@@ -88,10 +88,10 @@ pip install -r requirements.txt
 
 mkdir runs
 cd runs
-mkdir devign_defect-detection
-mkdir xlcost_code-translation
-mkdir xlcost_code-generation
-mkdir concode_code-generation
+mkdir devign_defect_detection
+mkdir xlcost_code_translation
+mkdir xlcost_code_generation
+mkdir concode_code_generation
 ```
 
 ## Examples of running arguments

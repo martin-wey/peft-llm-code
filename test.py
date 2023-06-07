@@ -1,5 +1,6 @@
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, default_data_collator
+from peft import LoraConfig, TaskType, get_peft_model
 from torch.utils.data import DataLoader
 
 from utils import *
