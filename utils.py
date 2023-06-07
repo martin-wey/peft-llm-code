@@ -1,8 +1,8 @@
-import json
 import os
 
-from datasets import Dataset, concatenate_datasets
 from tqdm import tqdm
+
+from datasets import Dataset, DatasetDict, concatenate_datasets
 
 LANG_TO_EXT = {
     'C#': "cs",
@@ -39,7 +39,7 @@ def load_xlcost_code_translation_dataset(base_dir):
             datasets[split].append(ds)
     for split in ["train", "val", "test"]:
         datasets[split] = concatenate_datasets(datasets[split])
-    return datasets["train"], datasets["val"], datasets["test"]
+    return DatasetDict(datasets)
 
 
 def load_xlcost_code_generation_dataset(base_dir):
@@ -62,7 +62,7 @@ def load_xlcost_code_generation_dataset(base_dir):
             datasets[split].append(ds)
     for split in ["train", "val", "test"]:
         datasets[split] = concatenate_datasets(datasets[split])
-    return datasets["train"], datasets["val"], datasets["test"]
+    return DatasetDict(datasets)
 
 
 def load_concode_code_generation_dataset(base_dir):
@@ -73,10 +73,10 @@ def load_concode_code_generation_dataset(base_dir):
     for split in tqdm(["train", "valid", "test"], desc="Loading CONCODE code generation dataset"):
         ds = Dataset.from_json(f"{dataset_dir}/{split}.json")
         datasets[split] = ds
-    return datasets["train"], datasets["valid"], datasets["test"]
+    return DatasetDict(datasets)
 
 
-def load_devign_defect_prediction_dataset(base_dir):
+def load_devign_defect_detection_dataset(base_dir):
     dataset_name = "devign_defect-detection"
     dataset_dir = os.path.join(base_dir, dataset_name)
 
@@ -84,4 +84,4 @@ def load_devign_defect_prediction_dataset(base_dir):
     for split in tqdm(["train", "valid", "test"], desc="Loading Devign defect detection dataset"):
         ds = Dataset.from_json(f"{dataset_dir}/{split}.jsonl")
         datasets[split] = ds
-    return datasets["train"], datasets["valid"], datasets["test"]
+    return DatasetDict(datasets)

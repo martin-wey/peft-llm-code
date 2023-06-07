@@ -19,3 +19,40 @@
    3. CodeGen
    4. CodeT5+
    5. PolyCoder
+
+## Setup
+
+```shell
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+mkdir runs
+cd runs
+mkdir devign_defect-detection
+mkdir xlcost_code-translation
+mkdir xlcost_code-generation
+mkdir concode_code-generation
+```
+
+## Examples of running arguments
+
+Running arguments using a single Nvidia V100L 32Gi GPU.
+
+### Defect detection
+
+- CodeBERT fine-tuning:
+```shell
+python main.py \
+  --model_name_or_path microsoft/codebert-base \
+  --model_type roberta \
+  --task devign_defect-detection \
+  --training_method ft \
+  --train_batch_size 32 \
+  --val_batch_size 32 \
+  --learning_rate 5e-5 \
+  --weight_decay 0 \
+  --num_epochs 5 \
+  --defect_max_seq_length 400 
+```
+Training time ~42min, peak GPU memory usage 17Gi.
