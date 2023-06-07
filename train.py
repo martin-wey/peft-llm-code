@@ -1,5 +1,3 @@
-import logging
-
 import evaluate
 import numpy as np
 from transformers import \
@@ -10,8 +8,6 @@ from transformers import \
     Trainer
 
 from utils import *
-
-logger = logging.getLogger(__name__)
 
 
 def train_devign_defect_detection(args):

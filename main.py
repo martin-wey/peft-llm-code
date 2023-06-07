@@ -2,9 +2,12 @@ import argparse
 import logging
 from pathlib import Path
 
+import datasets
+import transformers
 from transformers import set_seed
 
 from train import *
+from test import *
 from utils import *
 
 logger = logging.getLogger(__name__)
@@ -22,7 +25,8 @@ def main(args):
             logger.info(f"Running fine-tuning of {args.model_name_or_path} for defect detection.")
             train_devign_defect_detection(args)
         if args.do_test:
-            pass
+            logger.info(f"Testing model {args.model_name_or_path} on defect detection.")
+            test_devign_defect_detection(args)
     else:
         raise ValueError("Wrong task argument name.")
 
@@ -62,7 +66,9 @@ if __name__ == "__main__":
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
-        handlers=[logging.FileHandler(args.run_dir / "info.log"), logging.StreamHandler()],
+        handlers=[logging.StreamHandler()],
     )
+    datasets.utils.logging.set_verbosity(logging.INFO)
+    transformers.utils.logging.set_verbosity(logging.INFO)
 
     main(args)
