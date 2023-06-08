@@ -1,9 +1,9 @@
 import evaluate
 import numpy as np
-from peft import LoraConfig, TaskType, get_peft_model
 from transformers import \
     AutoModelForSequenceClassification, \
     AutoModelForCausalLM, \
+    AutoModelForSeq2SeqLM, \
     AutoTokenizer, \
     default_data_collator, \
     TrainingArguments, \
@@ -11,45 +11,104 @@ from transformers import \
 
 from utils import *
 
+DEFECT_MODEL_CLS = {
+    "encoder": AutoModelForSequenceClassification,
+    "decoder": AutoModelForCausalLM,
+    "encoder-decoder": AutoModelForSeq2SeqLM
+}
+
+GENERATION_MODEL_CLS = {
+    "encoder": AutoModelForSeq2SeqLM,
+    "decoder": AutoModelForCausalLM,
+    "encoder-decoder": AutoModelForSeq2SeqLM
+}
+
 
 def train_devign_defect_detection(args):
-    metric = evaluate.load("accuracy")
-
-    def compute_metrics(eval_pred):
-        predictions, labels = eval_pred
-        predictions = np.argmax(predictions, axis=1)
-        return metric.compute(predictions=predictions, references=labels)
-
-    def convert_samples_to_features(examples):
-        tokenized_inputs = tokenizer(examples["func"],
-                                     truncation=True,
-                                     padding="max_length",
-                                     max_length=args.defect_max_seq_length)
-        tokenized_inputs["labels"] = examples["target"]
-        return tokenized_inputs
-
     dataset = load_devign_defect_detection_dataset(args.dataset_dir)
     del dataset["test"]
 
-    model = AutoModelForSequenceClassification.from_pretrained(args.model_name_or_path, return_dict=True)
+    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, return_dict=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
 
-    dataset = dataset.map(convert_samples_to_features,
-                          batched=True,
-                          num_proc=args.num_workers,
-                          remove_columns=[cname for cname in dataset["train"].column_names if
-                                          cname not in ["input_ids", "labels", "attention_mask"]],
-                          desc="Generating samples features.")
+    if args.model_type == "encoder":
+        metric = evaluate.load("accuracy")
 
-    if args.training_method == "lora":
-        peft_config = LoraConfig(
-            task_type=TaskType.SEQ_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all"
-        )
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
+        def compute_metrics(eval_pred):
+            predictions, labels = eval_pred
+            predictions = np.argmax(predictions, axis=1)
+            return metric.compute(predictions=predictions, references=labels)
+
+        def preprocess_function(examples):
+            tokenized_inputs = tokenizer(examples["func"],
+                                         truncation=True,
+                                         padding="max_length",
+                                         max_length=args.defect_max_seq_length)
+            tokenized_inputs["labels"] = examples["target"]
+            return tokenized_inputs
+
+        dataset = dataset.map(preprocess_function,
+                              num_proc=args.num_workers,
+                              remove_columns=dataset["train"].column_names,
+                              desc="Generating samples features.")
+    elif args.model_type == "decoder":
+        metric = evaluate.load("seqeval")
+
+        def compute_metrics(eval_pred):
+            predictions, labels = eval_pred
+            predictions = np.argmax(predictions[0], axis=2)
+
+            true_predictions = [
+                [tokenizer.decode(p).strip() for (p, l) in zip(prediction, label) if l != -100]
+                for prediction, label in zip(predictions, labels)
+            ]
+            true_labels = [
+                [tokenizer.decode(l) for (p, l) in zip(prediction, label) if l != -100]
+                for prediction, label in zip(predictions, labels)
+            ]
+
+            results = metric.compute(predictions=true_predictions, references=true_labels)
+            return {
+                "precision": results["overall_precision"],
+                "recall": results["overall_recall"],
+                "f1": results["overall_f1"],
+                "accuracy": results["overall_accuracy"],
+            }
+
+        def preprocess_function(examples):
+            suffix = tokenizer(" Labels : ")
+            labels = tokenizer(examples["text_label"])
+            max_input_len = args.defect_max_seq_length - len(suffix.input_ids) - len(labels.input_ids)
+            # perform truncation only on the code to avoid truncating the suffix and labels
+            inputs = tokenizer(examples["func"],
+                               truncation=True,
+                               max_length=args.defect_max_seq_length - max_input_len)
+            input_ids = inputs.input_ids + suffix.input_ids + labels.input_ids + [tokenizer.pad_token_id]
+            attention_mask = [1] * len(input_ids)
+            labels = [-100] * (len(inputs.input_ids) + len(suffix.input_ids)) + labels.input_ids + [-100]
+
+            # padding
+            attention_mask = [0] * (args.defect_max_seq_length - len(input_ids)) + attention_mask
+            labels = [-100] * (args.defect_max_seq_length - len(input_ids)) + labels
+            input_ids = [tokenizer.pad_token_id] * (args.defect_max_seq_length - len(input_ids)) + input_ids
+
+            return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+
+        # transform the labels into textual labels
+        id2label = {
+            0: "No",
+            1: "Yes"
+        }
+        dataset = dataset.map(lambda x: {"text_label": [id2label[label] for label in x["target"]]},
+                              batched=True,
+                              num_proc=args.num_workers)
+        dataset = dataset.map(preprocess_function,
+                              num_proc=args.num_workers,
+                              remove_columns=dataset["train"].column_names,
+                              desc="Generating samples features.")
 
     training_args = TrainingArguments(
         output_dir=args.run_dir,
@@ -74,14 +133,6 @@ def train_devign_defect_detection(args):
         compute_metrics=compute_metrics,
     )
     trainer.train()
-
-
-def train_concode_code_generation(args):
-    pass
-
-
-def train_xlcost_code_generation(args):
-    pass
 
 
 def train_xlcost_code_translation(args):
@@ -152,3 +203,11 @@ def train_xlcost_code_translation(args):
         data_collator=default_data_collator
     )
     trainer.train()
+
+
+def train_concode_code_generation(args):
+    pass
+
+
+def train_xlcost_code_generation(args):
+    pass
