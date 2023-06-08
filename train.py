@@ -98,7 +98,7 @@ def train_xlcost_code_translation(args):
                                     add_special_tokens=False)
         tokenized_input_ids = [tokenizer.bos_token_id] + tokenized_input.input_ids + [tokenizer.eos_token_id]
         input_padding_len = (args.translation_max_input_length - len(tokenized_input_ids))
-        input_attention_mask = [0] + tokenized_input.attention_mask + [0] + [0] * input_padding_len
+        input_attention_mask = [1] + tokenized_input.attention_mask + [1] + [0] * input_padding_len
         padded_input_ids = tokenized_input_ids + [tokenizer.pad_token_id] * input_padding_len
 
         tokenized_target = tokenizer(example["target"],
@@ -107,7 +107,7 @@ def train_xlcost_code_translation(args):
                                      add_special_tokens=False)
         tokenized_target_ids = tokenized_target.input_ids + [tokenizer.eos_token_id]
         target_padding_len = (args.translation_max_target_length - len(tokenized_target_ids))
-        target_attention_mask = tokenized_target.attention_mask + [0] + [0] * target_padding_len
+        target_attention_mask = tokenized_target.attention_mask + [1] + [0] * target_padding_len
         padded_target_ids = tokenized_target_ids + [tokenizer.pad_token_id] * target_padding_len
 
         input_ids = padded_input_ids + padded_target_ids

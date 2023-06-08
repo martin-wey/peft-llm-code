@@ -15,6 +15,9 @@ def main(args):
         if args.do_train:
             logger.info(f"Running fine-tuning of {args.model_name_or_path} for code translation.")
             train_xlcost_code_translation(args)
+        if args.do_test:
+            logger.info(f"Testing model {args.model_name_or_path} on code translation.")
+            test_xlcost_code_translation(args)
     elif args.task == "xlcost_code_generation":
         pass
     elif args.task == "concode_code_generation":
@@ -50,6 +53,9 @@ if __name__ == "__main__":
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
     parser.add_argument("--translation_max_input_length", default=256, type=int)
     parser.add_argument("--translation_max_target_length", default=256, type=int)
+    parser.add_argument("--do_sample", default=False, type=bool)
+    parser.add_argument("--temperature", default=0.7, type=float)
+    parser.add_argument("--beam_size", default=5, type=int)
 
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
@@ -61,10 +67,12 @@ if __name__ == "__main__":
     set_seed(args.seed)
 
     # Setup logging and output directories
-    args.run_name = f"{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
-    args.run_dir = Path(f"{args.output_dir}/{args.task}/{args.run_name}")
     if args.do_train:
+        args.run_name = f"{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
+        args.run_dir = Path(f"{args.output_dir}/{args.task}/{args.run_name}")
         args.run_dir.mkdir(exist_ok=True)
+    else:
+        args.run_dir = args.model_name_or_path
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
