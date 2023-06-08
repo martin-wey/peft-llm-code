@@ -1,9 +1,4 @@
-import evaluate
-import numpy as np
 from transformers import \
-    AutoModelForSequenceClassification, \
-    AutoModelForCausalLM, \
-    AutoModelForSeq2SeqLM, \
     AutoTokenizer, \
     default_data_collator, \
     TrainingArguments, \
@@ -11,37 +6,18 @@ from transformers import \
 
 from utils import *
 
-DEFECT_MODEL_CLS = {
-    "encoder": AutoModelForSequenceClassification,
-    "decoder": AutoModelForCausalLM,
-    "encoder-decoder": AutoModelForSeq2SeqLM
-}
-
-GENERATION_MODEL_CLS = {
-    "encoder": AutoModelForSeq2SeqLM,
-    "decoder": AutoModelForCausalLM,
-    "encoder-decoder": AutoModelForSeq2SeqLM
-}
-
 
 def train_devign_defect_detection(args):
     dataset = load_devign_defect_detection_dataset(args.dataset_dir)
     del dataset["test"]
 
-    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, return_dict=True)
+    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
 
     if args.model_type == "encoder":
-        metric = evaluate.load("accuracy")
-
-        def compute_metrics(eval_pred):
-            predictions, labels = eval_pred
-            predictions = np.argmax(predictions, axis=1)
-            return metric.compute(predictions=predictions, references=labels)
-
         def preprocess_function(examples):
             tokenized_inputs = tokenizer(examples["func"],
                                          truncation=True,
@@ -55,37 +31,14 @@ def train_devign_defect_detection(args):
                               remove_columns=dataset["train"].column_names,
                               desc="Generating samples features.")
     elif args.model_type == "decoder":
-        metric = evaluate.load("seqeval")
-
-        def compute_metrics(eval_pred):
-            predictions, labels = eval_pred
-            predictions = np.argmax(predictions[0], axis=2)
-
-            true_predictions = [
-                [tokenizer.decode(p).strip() for (p, l) in zip(prediction, label) if l != -100]
-                for prediction, label in zip(predictions, labels)
-            ]
-            true_labels = [
-                [tokenizer.decode(l) for (p, l) in zip(prediction, label) if l != -100]
-                for prediction, label in zip(predictions, labels)
-            ]
-
-            results = metric.compute(predictions=true_predictions, references=true_labels)
-            return {
-                "precision": results["overall_precision"],
-                "recall": results["overall_recall"],
-                "f1": results["overall_f1"],
-                "accuracy": results["overall_accuracy"],
-            }
-
         def preprocess_function(examples):
             suffix = tokenizer(" Labels : ")
             labels = tokenizer(examples["text_label"])
-            max_input_len = args.defect_max_seq_length - len(suffix.input_ids) - len(labels.input_ids)
+            max_input_len = args.defect_max_seq_length - len(suffix.input_ids) - len(labels.input_ids) - 1
             # perform truncation only on the code to avoid truncating the suffix and labels
             inputs = tokenizer(examples["func"],
                                truncation=True,
-                               max_length=args.defect_max_seq_length - max_input_len)
+                               max_length=max_input_len)
             input_ids = inputs.input_ids + suffix.input_ids + labels.input_ids + [tokenizer.pad_token_id]
             attention_mask = [1] * len(input_ids)
             labels = [-100] * (len(inputs.input_ids) + len(suffix.input_ids)) + labels.input_ids + [-100]
@@ -97,11 +50,8 @@ def train_devign_defect_detection(args):
 
             return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
-        # transform the labels into textual labels
-        id2label = {
-            0: "No",
-            1: "Yes"
-        }
+        # transform the labels into textual labels for generation
+        id2label = {0: "No", 1: "Yes"}
         dataset = dataset.map(lambda x: {"text_label": [id2label[label] for label in x["target"]]},
                               batched=True,
                               num_proc=args.num_workers)
@@ -129,14 +79,13 @@ def train_devign_defect_detection(args):
         train_dataset=dataset["train"],
         eval_dataset=dataset["valid"],
         tokenizer=tokenizer,
-        data_collator=default_data_collator,
-        compute_metrics=compute_metrics,
+        data_collator=default_data_collator
     )
     trainer.train()
 
 
 def train_xlcost_code_translation(args):
-    def convert_samples_to_features(example):
+    def preprocess_function(example):
         # This is the implementation for causal language modeling,
         # for conditional generation (i.e., using encoder-decoder), the feature extraction is different (@todo)
 
@@ -175,7 +124,7 @@ def train_xlcost_code_translation(args):
 
     dataset = load_xlcost_code_translation_dataset(args.dataset_dir)
     del dataset["test"]
-    dataset = dataset.map(convert_samples_to_features,
+    dataset = dataset.map(preprocess_function,
                           num_proc=args.num_workers,
                           remove_columns=[cname for cname in dataset["train"].column_names if
                                           cname not in ["input_ids", "labels", "attention_mask"]],
@@ -188,10 +137,11 @@ def train_xlcost_code_translation(args):
         per_device_eval_batch_size=args.val_batch_size,
         num_train_epochs=args.num_epochs,
         weight_decay=args.weight_decay,
-        evaluation_strategy="epoch",
+        evaluation_strategy="steps",
+        eval_steps=20,
         logging_strategy="steps",
         logging_steps=100,
-        save_strategy="epoch",
+        save_strategy="steps",
         load_best_model_at_end=True,
     )
     trainer = Trainer(

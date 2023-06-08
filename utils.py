@@ -1,8 +1,24 @@
 import os
 
+from transformers import \
+    AutoModelForSequenceClassification, \
+    AutoModelForCausalLM, \
+    AutoModelForSeq2SeqLM
 from tqdm import tqdm
 
 from datasets import Dataset, DatasetDict, concatenate_datasets
+
+DEFECT_MODEL_CLS = {
+    "encoder": AutoModelForSequenceClassification,
+    "decoder": AutoModelForCausalLM,
+    "encoder-decoder": AutoModelForSeq2SeqLM
+}
+
+GENERATION_MODEL_CLS = {
+    "encoder": AutoModelForSeq2SeqLM,
+    "decoder": AutoModelForCausalLM,
+    "encoder-decoder": AutoModelForSeq2SeqLM
+}
 
 LANG_TO_EXT = {
     'C#': "cs",
