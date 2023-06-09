@@ -146,7 +146,7 @@ def test_xlcost_code_translation(args):
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
 
-    def process_function(examples):
+    def preprocess_function_dec(examples):
         examples_inputs = [f"# {input_lang} -> {target_lang} : {input}"
                            for (input_lang, target_lang, input) in zip(examples["input_lang"],
                                                                        examples["target_lang"],
@@ -166,13 +166,30 @@ def test_xlcost_code_translation(args):
 
         return {"input_ids": padded_input_ids, "attention_mask": padded_attention_mask}
 
-    test_dataset = test_dataset.map(process_function,
+    def preprocess_function_encdec(examples):
+        examples_inputs = [f"# {input_lang} -> {target_lang} : {input}"
+                           for (input_lang, target_lang, input) in zip(examples["input_lang"],
+                                                                       examples["target_lang"],
+                                                                       examples["input"])]
+        model_inputs = tokenizer(examples_inputs,
+                                 truncation=True,
+                                 padding="max_length",
+                                 max_length=args.translation_max_input_length)
+        labels = tokenizer(examples["target"],
+                           truncation=True,
+                           padding="max_length",
+                           max_length=args.translation_max_target_length)
+        model_inputs["labels"] = labels.input_ids
+        return model_inputs
+
+    preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
+    test_dataset = test_dataset.map(preprocess_function,
                                     batched=True,
                                     batch_size=args.val_batch_size,
                                     num_proc=args.num_workers,
                                     remove_columns=[cname for cname in test_dataset.column_names if
-                                                    cname not in ["input_ids", "attention_mask",
-                                                                  "target", "input_lang", "target_lang"]],
+                                                    cname not in ["input_ids", "attention_mask", "labels",
+                                                                  "input_lang", "target_lang"]],
                                     desc="Generating samples features.")
     dataloader = DataLoader(test_dataset,
                             batch_size=args.val_batch_size,
@@ -180,6 +197,7 @@ def test_xlcost_code_translation(args):
                             pin_memory=True)
 
     predictions = []
+    references = []
     for batch in tqdm(dataloader, total=len(test_dataset) // args.val_batch_size):
         batch = {k: v.to(args.device) for k, v in batch.items()}
         with torch.no_grad():
@@ -195,17 +213,22 @@ def test_xlcost_code_translation(args):
                     [EndOfFunctionCriteria(batch["input_ids"].shape[1], EOF_STRINGS, tokenizer)]
                 )
             )
-            batch_generated_tokens = tokenizer.batch_decode(batch_generation[:, batch["input_ids"].shape[1]:],
-                                                            skip_special_tokens=True)
+            if args.model_type == "decoder":
+                batch_generated_tokens = tokenizer.batch_decode(batch_generation[:, batch["input_ids"].shape[1]:],
+                                                                skip_special_tokens=True)
+            else:
+                batch_generated_tokens = tokenizer.batch_decode(batch_generation, skip_special_tokens=True)
+            batch_references = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
             predictions += [generated_tokens for generated_tokens in batch_generated_tokens]
+            references += [tokens for tokens in batch_references]
 
     logger.info(f"Exporting test predictions in directory {args.run_dir}.")
-    with open(os.path.join(args.run_dir, f"predictions.txt"), "w") as fpred, \
-            open(os.path.join(args.run_dir, f"references.txt"), "w") as fref:
-        for prediction, reference in zip(predictions, test_dataset):
+    with open(os.path.join(args.run_dir, f"predictions.txt"), "w", encoding="utf-8") as fpred, \
+            open(os.path.join(args.run_dir, f"references.txt"), "w", encoding="utf-8") as fref:
+        for prediction, reference, dataset in zip(predictions, references, test_dataset):
             fpred.write(
-                reference["input_lang"] + ";" + reference["target_lang"] + " | " +
+                dataset["input_lang"] + ";" + dataset["target_lang"] + " | " +
                 prediction.replace("\n", "") + "\n")
             fref.write(
-                reference["input_lang"] + ";" + reference["target_lang"] + " | " +
-                reference["target"].replace("\n", "") + "\n")
+                dataset["input_lang"] + ";" + dataset["target_lang"] + " | " +
+                reference.replace("\n", "") + "\n")

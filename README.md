@@ -13,8 +13,8 @@
 |-------------------------|------------|---------|---------|-----------------|
 | devign_defect_detection | train      | ✅       |  ✅       |      ✅           |
 |                         | test       | ✅       |    ✅     |        ✅         |
-| xlcost_code_translation | train      | /       | ✅  |     ❌            |
-|                         | test       | /       | ✅     |     ❌            |
+| xlcost_code_translation | train      | /       | ✅  |     ✅            |
+|                         | test       | /       | ✅     |     ✅            |
 | xlcost_code_generation  | train      | /       | ❌   | ❌           |
 |                         | test       | /       | ❌     | ❌             |
 | concode_code_generation | train      | /       | ❌   | ❌           |
