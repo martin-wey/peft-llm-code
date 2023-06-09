@@ -75,8 +75,8 @@ def test_devign_defect_detection(args):
             total_correct += (predicted_labels == batch["labels"]).sum().item()
         accuracy = total_correct / len(test_dataset)
         logger.info(f"Accuracy: {round(accuracy * 100, 2)}%")
-    elif args.model_type == "decoder":
-        def preprocess_function(examples):
+    else:
+        def preprocess_function_dec(examples):
             suffix = tokenizer(" Labels : ")
             labels = tokenizer(examples["text_label"]).input_ids
             max_input_len = args.defect_max_seq_length - len(suffix.input_ids)
@@ -90,12 +90,22 @@ def test_devign_defect_detection(args):
 
             return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
+        def preprocess_function_encdec(examples):
+            model_inputs = tokenizer(examples["func"],
+                                     truncation=True,
+                                     padding="max_length",
+                                     max_length=args.defect_max_seq_length)
+            labels = tokenizer(examples["text_label"]).input_ids
+            model_inputs["labels"] = labels
+            return model_inputs
+
         # transform the labels into textual labels for generation
         id2label = {0: "No", 1: "Yes"}
         target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in id2label.values()])
         test_dataset = test_dataset.map(lambda x: {"text_label": [id2label[label] for label in x["target"]]},
                                         batched=True,
                                         num_proc=args.num_workers)
+        preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
         test_dataset = test_dataset.map(preprocess_function,
                                         num_proc=args.num_workers,
                                         remove_columns=test_dataset.column_names,
@@ -113,9 +123,12 @@ def test_devign_defect_detection(args):
                     attention_mask=batch["attention_mask"],
                     max_new_tokens=target_max_length,
                 )
-                batch_predictions = tokenizer.batch_decode(batch_generation[:, batch["input_ids"].shape[1]:],
-                                                           skip_special_tokens=True)
-                batch_references = tokenizer.batch_decode(batch["labels"])
+                if args.model_type == "decoder":
+                    batch_predictions = tokenizer.batch_decode(batch_generation[:, batch["input_ids"].shape[1]:],
+                                                               skip_special_tokens=True)
+                else:
+                    batch_predictions = tokenizer.batch_decode(batch_generation, skip_special_tokens=True)
+                batch_references = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
                 for pred, ref in zip(batch_predictions, batch_references):
                     if pred == ref:
                         total_correct += 1

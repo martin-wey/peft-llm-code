@@ -2,6 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
+import wandb
 from transformers import set_seed
 
 from test import *
@@ -59,6 +60,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
+    parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--wandb_project_name", default="peft-code", type=str)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--seed", type=int, default=42)
@@ -79,5 +82,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         handlers=[logging.StreamHandler()],
     )
+
+    if args.use_wandb:
+        wandb.init(project=args.wandb_project_name, name=args.run_name, group=args.task)
 
     main(args)
