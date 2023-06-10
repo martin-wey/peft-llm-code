@@ -4,8 +4,8 @@ from transformers import \
     TrainingArguments, \
     Trainer, \
     Seq2SeqTrainingArguments, \
-    Seq2SeqTrainer
-from transformers.integrations import WandbCallback
+    Seq2SeqTrainer, \
+    AutoConfig
 
 from utils import *
 
@@ -14,7 +14,7 @@ def train_devign_defect_detection(args):
     dataset = load_devign_defect_detection_dataset(args.dataset_dir)
     del dataset["test"]
 
-    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
+    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -88,9 +88,9 @@ def train_devign_defect_detection(args):
                               remove_columns=dataset["train"].column_names,
                               desc="Generating samples features.")
 
-    training_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
+    training_args_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
     trainer_cls = Seq2SeqTrainer if args.model_type == "encoder-decoder" else Trainer
-    training_args = training_cls(
+    training_args = training_args_cls(
         output_dir=args.run_dir,
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.train_batch_size,
@@ -102,6 +102,7 @@ def train_devign_defect_detection(args):
         logging_steps=100,
         save_strategy="epoch",
         load_best_model_at_end=True,
+        report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
         model=model,
@@ -110,17 +111,23 @@ def train_devign_defect_detection(args):
         eval_dataset=dataset["valid"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[WandbCallback()] if args.use_wandb else None
     )
     trainer.train()
 
 
 def train_xlcost_code_translation(args):
-    dataset = load_xlcost_code_translation_dataset(args.dataset_dir)
+    dataset = load_xlcost_code_translation_dataset(args.dataset_dir, train_samples_percentage=0.25)
     del dataset["test"]
 
-    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path).to(args.device)
+    if args.model_type == "encoder":
+        config = AutoConfig.from_pretrained(args.model_name_or_path)
+        config.is_decoder = True
+        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, config=config)
+    else:
+        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
+    model.to(args.device)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
@@ -174,9 +181,9 @@ def train_xlcost_code_translation(args):
                           remove_columns=dataset["train"].column_names,
                           desc="Generating samples features.")
 
-    training_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
+    training_args_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
     trainer_cls = Seq2SeqTrainer if args.model_type == "encoder-decoder" else Trainer
-    training_args = training_cls(
+    training_args = training_args_cls(
         output_dir=args.run_dir,
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.train_batch_size,
@@ -188,6 +195,7 @@ def train_xlcost_code_translation(args):
         logging_steps=100,
         save_strategy="epoch",
         load_best_model_at_end=True,
+        report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
         model=model,
@@ -195,8 +203,7 @@ def train_xlcost_code_translation(args):
         train_dataset=dataset["train"],
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
-        data_collator=default_data_collator,
-        callbacks=[WandbCallback()] if args.use_wandb else None
+        data_collator=default_data_collator
     )
     trainer.train()
 

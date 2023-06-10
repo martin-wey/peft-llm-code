@@ -1,6 +1,7 @@
 import logging
 import os
 
+from peft import PeftConfig, PeftModel
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -155,16 +156,20 @@ def test_xlcost_code_translation(args):
                                      truncation=True,
                                      max_length=args.translation_max_input_length - 2,
                                      add_special_tokens=False)
-        input_ids = [[tokenizer.bos_token_id] + input_ids + [tokenizer.eos_token_id]
-                     for input_ids in tokenized_inputs.input_ids]
-        attention_mask = [[1] + mask + [1] for mask in tokenized_inputs.attention_mask]
+        input_ids = [input_ids + [tokenizer.eos_token_id] for input_ids in tokenized_inputs.input_ids]
+        attention_mask = [mask + [1] for mask in tokenized_inputs.attention_mask]
 
         # pad the sequences dynamically to the length of the longest sequence in the batch
         max_len = max(len(ids) for ids in input_ids)
-        padded_input_ids = torch.tensor([ids + [tokenizer.pad_token_id] * (max_len - len(ids)) for ids in input_ids])
-        padded_attention_mask = torch.tensor([mask + [0] * (max_len - len(mask)) for mask in attention_mask])
+        padded_input_ids = torch.tensor([[tokenizer.pad_token_id] * (max_len - len(ids)) + ids for ids in input_ids])
+        padded_attention_mask = torch.tensor([[0] * (max_len - len(mask)) + mask for mask in attention_mask])
 
-        return {"input_ids": padded_input_ids, "attention_mask": padded_attention_mask}
+        labels = tokenizer(examples["target"],
+                           truncation=True,
+                           padding="max_length",
+                           max_length=args.translation_max_target_length).input_ids
+
+        return {"input_ids": padded_input_ids, "attention_mask": padded_attention_mask, "labels": labels}
 
     def preprocess_function_encdec(examples):
         examples_inputs = [f"# {input_lang} -> {target_lang} : {input}"

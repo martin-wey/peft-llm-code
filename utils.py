@@ -15,7 +15,7 @@ DEFECT_MODEL_CLS = {
 }
 
 GENERATION_MODEL_CLS = {
-    "encoder": AutoModelForSeq2SeqLM,
+    "encoder": AutoModelForCausalLM,
     "decoder": AutoModelForCausalLM,
     "encoder-decoder": AutoModelForSeq2SeqLM
 }
@@ -33,7 +33,7 @@ LANG_TO_EXT = {
 }
 
 
-def load_xlcost_code_translation_dataset(base_dir):
+def load_xlcost_code_translation_dataset(base_dir, train_samples_percentage=1):
     dataset_name = "xlcost_code-translation"
     dataset_dir = os.path.join(base_dir, dataset_name)
     lang_pairs = os.listdir(dataset_dir)
@@ -52,6 +52,10 @@ def load_xlcost_code_translation_dataset(base_dir):
             ds = Dataset.from_dict({"input": input_data, "target": target_data})
             ds = ds.add_column(name="input_lang", column=[input_lang] * len(ds))
             ds = ds.add_column(name="target_lang", column=[target_lang] * len(ds))
+
+            if split == "train":
+                ds = ds.select(range(int(train_samples_percentage * len(ds))))
+
             datasets[split].append(ds)
     for split in ["train", "val", "test"]:
         datasets[split] = concatenate_datasets(datasets[split])
