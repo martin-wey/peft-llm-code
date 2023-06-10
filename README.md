@@ -15,7 +15,7 @@
 |                         | test       | ✅       |    ✅     |        ✅         |
 | xlcost_code_translation | train      | /       | ✅  |     ✅            |
 |                         | test       | /       | ✅     |     ✅            |
-| xlcost_code_generation  | train      | /       | ❌   | ❌           |
+| xlcost_code_generation  | train      | /       | ✅   | ✅           |
 |                         | test       | /       | ❌     | ❌             |
 | concode_code_generation | train      | /       | ❌   | ❌           |
 |                         | test       | /       | ❌     | ❌             |

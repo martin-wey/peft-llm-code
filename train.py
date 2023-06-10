@@ -1,3 +1,6 @@
+import os.path
+
+from peft import get_peft_model, LoraConfig, TaskType
 from transformers import \
     AutoTokenizer, \
     default_data_collator, \
@@ -5,16 +8,28 @@ from transformers import \
     Trainer, \
     Seq2SeqTrainingArguments, \
     Seq2SeqTrainer, \
-    AutoConfig
+    TrainerCallback
 
 from utils import *
+
+
+class SaveModelCallback(TrainerCallback):
+    def __init__(self, output_dir):
+        self.output_dir = output_dir
+
+    def on_epoch_end(self, args, state, control, model=None, **kwargs):
+        checkpoint_dir = os.path.join(self.output_dir, f"checkpoint_{state.global_step}")
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+        model.save_pretrained(checkpoint_dir)
+        self.tokenizer.save_pretrained(checkpoint_dir)
 
 
 def train_devign_defect_detection(args):
     dataset = load_devign_defect_detection_dataset(args.dataset_dir)
     del dataset["test"]
 
-    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, trust_remote_code=True)
+    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -100,8 +115,7 @@ def train_devign_defect_detection(args):
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=100,
-        save_strategy="epoch",
-        load_best_model_at_end=True,
+        save_strategy="no",
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -111,6 +125,7 @@ def train_devign_defect_detection(args):
         eval_dataset=dataset["valid"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
+        callbacks=[SaveModelCallback(args.run_dir)]
     )
     trainer.train()
 
@@ -119,13 +134,16 @@ def train_xlcost_code_translation(args):
     dataset = load_xlcost_code_translation_dataset(args.dataset_dir, train_samples_percentage=0.25)
     del dataset["test"]
 
-    if args.model_type == "encoder":
-        config = AutoConfig.from_pretrained(args.model_name_or_path)
-        config.is_decoder = True
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, config=config)
-    else:
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
-    model.to(args.device)
+    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
+    if args.training_method == "lora":
+        task_type = TaskType.CAUSAL_LM if args.model_type == "decoder" else TaskType.SEQ_2_SEQ_LM
+        peft_config = LoraConfig(task_type=task_type,
+                                 inference_mode=False,
+                                 r=16,
+                                 lora_alpha=32,
+                                 lora_dropout=0.0)
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
     if getattr(tokenizer, "pad_token_id") is None:
@@ -193,8 +211,7 @@ def train_xlcost_code_translation(args):
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=100,
-        save_strategy="epoch",
-        load_best_model_at_end=True,
+        save_strategy="no",
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -203,14 +220,109 @@ def train_xlcost_code_translation(args):
         train_dataset=dataset["train"],
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
-        data_collator=default_data_collator
+        data_collator=default_data_collator,
+        callbacks=[SaveModelCallback(args.run_dir)]
+    )
+    trainer.train()
+
+
+def train_xlcost_code_generation(args):
+    dataset = load_xlcost_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.50)
+    del dataset["test"]
+
+    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
+    if args.training_method == "lora":
+        task_type = TaskType.CAUSAL_LM if args.model_type == "decoder" else TaskType.SEQ_2_SEQ_LM
+        peft_config = LoraConfig(task_type=task_type,
+                                 inference_mode=False,
+                                 r=8,
+                                 lora_alpha=32,
+                                 lora_dropout=0.1)
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+
+    if getattr(tokenizer, "pad_token_id") is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        model.config.pad_token_id = model.config.eos_token_id
+
+    def preprocess_function_dec(example):
+        suffix = tokenizer(f" Code ({example['target_lang']}) : ")
+        max_input_len = args.codegen_max_input_length - len(suffix.input_ids) - 1
+        # perform truncation only on the code to avoid truncating the suffix
+        tokenized_input = tokenizer(example["input"],
+                                    truncation=True,
+                                    max_length=max_input_len)
+        tokenized_target = tokenizer(example["target"],
+                                     truncation=True,
+                                     max_length=args.codegen_max_target_length - 1)
+
+        tokenized_input_ids = tokenized_input.input_ids + suffix.input_ids + [tokenizer.eos_token_id]
+        tokenized_target_ids = tokenized_target.input_ids + [tokenizer.eos_token_id]
+
+        padding_len = (args.codegen_max_input_length + args.codegen_max_target_length) - \
+                      (len(tokenized_input_ids) + len(tokenized_target_ids))
+
+        padded_input_ids = [tokenizer.pad_token_id] * padding_len + tokenized_input_ids
+        input_attention_mask = [0] * padding_len + tokenized_input.attention_mask + suffix.attention_mask + [1]
+        target_attention_mask = tokenized_target.attention_mask + [1]
+
+        input_ids = padded_input_ids + tokenized_target_ids
+        attention_mask = input_attention_mask + target_attention_mask
+        labels = [-100] * len(padded_input_ids) + tokenized_target_ids
+
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+
+    def preprocess_function_encdec(example):
+        examples_inputs = f"{example['input']} Code ({example['target_lang']}) : "
+        model_inputs = tokenizer(examples_inputs,
+                                 truncation=True,
+                                 padding="max_length",
+                                 max_length=args.codegen_max_input_length)
+        labels = tokenizer(example["target"],
+                           truncation=True,
+                           padding="max_length",
+                           max_length=args.codegen_max_target_length)
+        labels = labels["input_ids"]
+        labels[labels == tokenizer.pad_token_id] = -100
+        model_inputs["labels"] = labels
+        return model_inputs
+
+    preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
+    dataset = dataset.map(preprocess_function,
+                          num_proc=args.num_workers,
+                          remove_columns=dataset["train"].column_names,
+                          desc="Generating samples features.")
+
+    training_args_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
+    trainer_cls = Seq2SeqTrainer if args.model_type == "encoder-decoder" else Trainer
+    training_args = training_args_cls(
+        output_dir=args.run_dir,
+        learning_rate=args.learning_rate,
+        per_device_train_batch_size=args.train_batch_size,
+        per_device_eval_batch_size=args.val_batch_size,
+        num_train_epochs=args.num_epochs,
+        weight_decay=args.weight_decay,
+        evaluation_strategy="epoch",
+        logging_strategy="steps",
+        logging_steps=100,
+        save_strategy="no",
+        report_to="wandb" if args.use_wandb else "none"
+    )
+    trainer = trainer_cls(
+        model=model,
+        args=training_args,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["val"],
+        tokenizer=tokenizer,
+        data_collator=default_data_collator,
+        callbacks=[SaveModelCallback(args.run_dir)]
     )
     trainer.train()
 
 
 def train_concode_code_generation(args):
-    pass
+    dataset = load_concode_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.25)
+    del dataset["test"]
 
-
-def train_xlcost_code_generation(args):
-    pass
+    print(dataset["train"][1000])

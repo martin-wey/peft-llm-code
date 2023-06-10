@@ -62,7 +62,7 @@ def load_xlcost_code_translation_dataset(base_dir, train_samples_percentage=1):
     return DatasetDict(datasets)
 
 
-def load_xlcost_code_generation_dataset(base_dir):
+def load_xlcost_code_generation_dataset(base_dir, train_samples_percentage=1):
     dataset_name = "xlcost_code-generation"
     dataset_dir = os.path.join(base_dir, dataset_name)
     lang_pairs = os.listdir(dataset_dir)
@@ -79,19 +79,29 @@ def load_xlcost_code_generation_dataset(base_dir):
             target_data = [sample.strip() for sample in open(target_file, encoding="utf-8").readlines()]
             ds = Dataset.from_dict({"input": input_data, "target": target_data})
             ds = ds.add_column(name="target_lang", column=[target_lang] * len(ds))
+
+            if split == "train":
+                ds = ds.select(range(int(train_samples_percentage * len(ds))))
+
             datasets[split].append(ds)
     for split in ["train", "val", "test"]:
         datasets[split] = concatenate_datasets(datasets[split])
     return DatasetDict(datasets)
 
 
-def load_concode_code_generation_dataset(base_dir):
+def load_concode_code_generation_dataset(base_dir, train_samples_percentage=1):
     dataset_name = "concode_code-generation"
     dataset_dir = os.path.join(base_dir, dataset_name)
 
     datasets = {}
     for split in tqdm(["train", "valid", "test"], desc="Loading CONCODE code generation dataset"):
         ds = Dataset.from_json(f"{dataset_dir}/{split}.json")
+
+        if split == "train":
+            ds = ds.select(range(int(train_samples_percentage * len(ds))))
+
+        ds = ds.rename_column("nl", "input")
+        ds = ds.rename_column("code", "target")
         datasets[split] = ds
     return DatasetDict(datasets)
 

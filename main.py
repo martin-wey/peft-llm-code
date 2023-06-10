@@ -20,9 +20,13 @@ def main(args):
             logger.info(f"Testing model {args.model_name_or_path} on code translation.")
             test_xlcost_code_translation(args)
     elif args.task == "xlcost_code_generation":
-        pass
+        if args.do_train:
+            logger.info(f"Running fine-tuning of {args.model_name_or_path} for code generation (XLCoST).")
+            train_xlcost_code_generation(args)
     elif args.task == "concode_code_generation":
-        pass
+        if args.do_train:
+            logger.info(f"Running fine-tuning of {args.model_name_or_path} for code generation (concode).")
+            train_concode_code_generation(args)
     elif args.task == "devign_defect_detection":
         if args.do_train:
             logger.info(f"Running fine-tuning of {args.model_name_or_path} for defect detection.")
@@ -52,8 +56,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", default=5, type=float)
 
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
+
     parser.add_argument("--translation_max_input_length", default=256, type=int)
     parser.add_argument("--translation_max_target_length", default=256, type=int)
+
+    parser.add_argument("--codegen_max_input_length", default=256, type=int)
+    parser.add_argument("--codegen_max_target_length", default=256, type=int)
+
     parser.add_argument("--do_sample", default=False, type=bool)
     parser.add_argument("--temperature", default=0.7, type=float)
     parser.add_argument("--beam_size", default=5, type=int)
