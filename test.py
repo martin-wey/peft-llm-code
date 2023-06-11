@@ -158,8 +158,8 @@ def test_xlcost_code_translation(args):
         model_inputs["attention_mask"] = [mask + [1] for mask in model_inputs["attention_mask"]]
 
         model_inputs["input_ids"] = [[tokenizer.pad_token_id] * (args.translation_max_target_length - len(input_ids))
-                                     for input_ids in model_inputs["input_ids"]]
-        model_inputs["attention_mask"] = [[0] * (args.translation_max_target_length - len(mask))
+                                     + input_ids for input_ids in model_inputs["input_ids"]]
+        model_inputs["attention_mask"] = [[0] * (args.translation_max_target_length - len(mask)) + mask
                                           for mask in model_inputs["attention_mask"]]
         labels = tokenizer(examples["target"],
                            truncation=True,
