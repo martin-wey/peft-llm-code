@@ -30,7 +30,7 @@ def train_devign_defect_detection(args):
     dataset = load_devign_defect_detection_dataset(args.dataset_dir)
     del dataset["test"]
 
-    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
+    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -38,48 +38,42 @@ def train_devign_defect_detection(args):
 
     if args.model_type == "encoder":
         def preprocess_function(examples):
-            tokenized_inputs = tokenizer(examples["func"],
-                                         truncation=True,
-                                         padding="max_length",
-                                         max_length=args.defect_max_seq_length)
-            tokenized_inputs["labels"] = examples["target"]
-            return tokenized_inputs
+            model_inputs = tokenizer(examples["func"],
+                                     truncation=True,
+                                     padding="max_length",
+                                     max_length=args.defect_max_seq_length)
+            model_inputs["labels"] = examples["target"]
+            return model_inputs
 
         dataset = dataset.map(preprocess_function,
-                              num_proc=args.num_workers,
-                              remove_columns=dataset["train"].column_names,
-                              desc="Generating samples features.")
-    elif args.model_type == "decoder":
-        def preprocess_function(example):
-            suffix = tokenizer(" Labels : ")
-            labels = tokenizer(example["text_label"])
-            max_input_len = args.defect_max_seq_length - len(suffix.input_ids) - len(labels.input_ids) - 1
-            # perform truncation only on the code to avoid truncating the suffix and labels
-            input = tokenizer(example["func"],
-                              truncation=True,
-                              max_length=max_input_len)
-            input_ids = input.input_ids + suffix.input_ids + labels.input_ids + [tokenizer.pad_token_id]
-            attention_mask = [1] * len(input_ids)
-            labels = [-100] * (len(input.input_ids) + len(suffix.input_ids)) + labels.input_ids + [-100]
-
-            # padding
-            attention_mask = [0] * (args.defect_max_seq_length - len(input_ids)) + attention_mask
-            labels = [-100] * (args.defect_max_seq_length - len(input_ids)) + labels
-            input_ids = [tokenizer.pad_token_id] * (args.defect_max_seq_length - len(input_ids)) + input_ids
-
-            return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
-
-        # transform the labels into textual labels for generation
-        id2label = {0: "No", 1: "Yes"}
-        dataset = dataset.map(lambda x: {"text_label": [id2label[label] for label in x["target"]]},
                               batched=True,
-                              num_proc=args.num_workers)
-        dataset = dataset.map(preprocess_function,
                               num_proc=args.num_workers,
                               remove_columns=dataset["train"].column_names,
                               desc="Generating samples features.")
-    elif args.model_type == "encoder-decoder":
-        def preprocess_function(examples):
+    else:
+        def preprocess_function_dec(example):
+            suffix = tokenizer(" Label : ")
+            label = tokenizer(example["text_label"])
+            max_input_len = args.defect_max_seq_length - len(suffix.input_ids) - len(label.input_ids) - 1
+            # perform truncation only on the code to avoid truncating the suffix and label
+            model_inputs = tokenizer(example["func"],
+                                     truncation=True,
+                                     max_length=max_input_len)
+            model_inputs["labels"] = [-100] * (len(model_inputs["input_ids"]) + len(suffix.input_ids)) \
+                                     + label.input_ids + [-100]
+            model_inputs["input_ids"] = model_inputs["input_ids"] + suffix.input_ids + label.input_ids \
+                                        + [tokenizer.eos_token_id]
+            model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"])
+
+            # left-padding
+            padding_len = args.defect_max_seq_length - len(model_inputs["input_ids"])
+            model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"]
+            model_inputs["labels"] = [-100] * padding_len + model_inputs["labels"]
+            model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
+
+            return model_inputs
+
+        def preprocess_function_encdec(examples):
             model_inputs = tokenizer(examples["func"],
                                      truncation=True,
                                      padding="max_length",
@@ -93,6 +87,7 @@ def train_devign_defect_detection(args):
             model_inputs["labels"] = labels
             return model_inputs
 
+        preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
         # transform the labels into textual labels for generation
         id2label = {0: "No", 1: "Yes"}
         target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in id2label.values()])
@@ -117,8 +112,6 @@ def train_devign_defect_detection(args):
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="no",
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -137,7 +130,7 @@ def train_xlcost_code_translation(args):
     dataset = load_xlcost_code_translation_dataset(args.dataset_dir, train_samples_percentage=0.25)
     del dataset["test"]
 
-    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
+    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
     if args.training_method == "lora":
         task_type = TaskType.CAUSAL_LM if args.model_type == "decoder" else TaskType.SEQ_2_SEQ_LM
         peft_config = LoraConfig(task_type=task_type,
@@ -156,33 +149,31 @@ def train_xlcost_code_translation(args):
     def preprocess_function_dec(example):
         # we inform the model what are the input and target languages
         #   by defining a prefix as follow: # {input_lang} -> {target_lang}
-        example_input = f"# {example['input_lang']} -> {example['target_lang']} : {example['input']}"
-        tokenized_input = tokenizer(example_input,
-                                    truncation=True,
-                                    max_length=args.translation_max_input_length - 1,
-                                    add_special_tokens=False)
+        example_input = f"{example['input_lang']} -> {example['target_lang']} : {example['input']}"
+        model_inputs = tokenizer(example_input,
+                                 truncation=True,
+                                 max_length=args.translation_max_input_length - 1)
         tokenized_target = tokenizer(example["target"],
                                      truncation=True,
-                                     max_length=args.translation_max_target_length - 1,
-                                     add_special_tokens=False)
-        tokenized_input_ids = tokenized_input.input_ids + [tokenizer.eos_token_id]
-        tokenized_target_ids = tokenized_target.input_ids + [tokenizer.eos_token_id]
+                                     max_length=args.translation_max_target_length - 1)
+        model_inputs["input_ids"] = model_inputs["input_ids"] + [tokenizer.eos_token_id]
+        tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
 
         padding_len = (args.translation_max_input_length + args.translation_max_target_length) - \
-                      (len(tokenized_input_ids) + len(tokenized_target_ids))
+                      (len(model_inputs["input_ids"]) + len(tokenized_target["input_ids"]))
 
-        input_attention_mask = [0] * padding_len + tokenized_input.attention_mask + [1]
-        padded_input_ids = [tokenizer.pad_token_id] * padding_len + tokenized_input_ids
-        target_attention_mask = tokenized_target.attention_mask + [1]
+        model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"] + [1]
+        model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
+        tokenized_target["attention_mask"] = tokenized_target["attention_mask"] + [1]
 
-        input_ids = padded_input_ids + tokenized_target_ids
-        attention_mask = input_attention_mask + target_attention_mask
-        labels = [-100] * len(padded_input_ids) + tokenized_target_ids
+        model_inputs["labels"] = [-100] * len(model_inputs["input_ids"]) + tokenized_target["input_ids"]
+        model_inputs["input_ids"] = model_inputs["input_ids"] + tokenized_target["input_ids"]
+        model_inputs["attention_mask"] = model_inputs["attention_mask"] + tokenized_target["attention_mask"]
 
-        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+        return model_inputs
 
     def preprocess_function_encdec(example):
-        example_input = f"# {example['input_lang']} -> {example['target_lang']} : {example['input']}"
+        example_input = f"{example['input_lang']} -> {example['target_lang']} : {example['input']}"
         model_inputs = tokenizer(example_input,
                                  truncation=True,
                                  padding="max_length",
@@ -191,7 +182,7 @@ def train_xlcost_code_translation(args):
                            truncation=True,
                            padding="max_length",
                            max_length=args.translation_max_target_length)
-        labels = labels["input_ids"]
+        labels = labels.input_ids
         labels = [label if label != tokenizer.pad_token_id else -100 for label in labels]
         model_inputs["labels"] = labels
         return model_inputs
@@ -215,8 +206,6 @@ def train_xlcost_code_translation(args):
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="no",
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -238,7 +227,7 @@ def train_code_generation(args):
         dataset = load_concode_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.25)
     del dataset["test"]
 
-    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
+    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
     if args.training_method == "lora":
         task_type = TaskType.CAUSAL_LM if args.model_type == "decoder" else TaskType.SEQ_2_SEQ_LM
         peft_config = LoraConfig(task_type=task_type,
@@ -255,34 +244,34 @@ def train_code_generation(args):
         model.config.pad_token_id = model.config.eos_token_id
 
     def preprocess_function_dec(example):
-        suffix = tokenizer(f" Code ({example['target_lang']}) : ")
+        suffix = tokenizer(f" Code {example['target_lang']} : ")
         max_input_len = args.codegen_max_input_length - len(suffix.input_ids) - 1
         # perform truncation only on the code to avoid truncating the suffix
-        tokenized_input = tokenizer(example["input"],
-                                    truncation=True,
-                                    max_length=max_input_len)
+        model_inputs = tokenizer(example["input"],
+                                 truncation=True,
+                                 max_length=max_input_len)
         tokenized_target = tokenizer(example["target"],
                                      truncation=True,
                                      max_length=args.codegen_max_target_length - 1)
-
-        tokenized_input_ids = tokenized_input.input_ids + suffix.input_ids + [tokenizer.eos_token_id]
-        tokenized_target_ids = tokenized_target.input_ids + [tokenizer.eos_token_id]
+        model_inputs["input_ids"] = model_inputs["input_ids"] + suffix.input_ids + [tokenizer.eos_token_id]
+        tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
 
         padding_len = (args.codegen_max_input_length + args.codegen_max_target_length) - \
-                      (len(tokenized_input_ids) + len(tokenized_target_ids))
+                      (len(model_inputs["input_ids"]) + len(tokenized_target["input_ids"]))
 
-        padded_input_ids = [tokenizer.pad_token_id] * padding_len + tokenized_input_ids
-        input_attention_mask = [0] * padding_len + tokenized_input.attention_mask + suffix.attention_mask + [1]
-        target_attention_mask = tokenized_target.attention_mask + [1]
+        model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
+        model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"] \
+                                         + suffix.attention_mask + [1]
+        tokenized_target["attention_mask"] = tokenized_target["attention_mask"] + [1]
 
-        input_ids = padded_input_ids + tokenized_target_ids
-        attention_mask = input_attention_mask + target_attention_mask
-        labels = [-100] * len(padded_input_ids) + tokenized_target_ids
+        model_inputs["labels"] = [-100] * len(model_inputs["input_ids"]) + tokenized_target["input_ids"]
+        model_inputs["input_ids"] = model_inputs["input_ids"] + tokenized_target["input_ids"]
+        model_inputs["attention_mask"] = model_inputs["attention_mask"] + tokenized_target["attention_mask"]
 
-        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+        return model_inputs
 
     def preprocess_function_encdec(example):
-        suffix = tokenizer(f" Code ({example['target_lang']}) : ", add_special_tokens=False)
+        suffix = tokenizer(f" Code {example['target_lang']} : ", add_special_tokens=False)
         model_inputs = tokenizer(example["input"],
                                  truncation=True,
                                  max_length=args.codegen_max_input_length - len(suffix.input_ids) - 2,
@@ -290,16 +279,17 @@ def train_code_generation(args):
         model_inputs["input_ids"] = [tokenizer.cls_token_id] + \
                                     model_inputs["input_ids"] + suffix.input_ids + \
                                     [tokenizer.eos_token_id]
-        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [tokenizer.pad_token_id] * \
-                                         (args.codegen_max_input_length - len(model_inputs["input_ids"]))
-        model_inputs["input_ids"] += [tokenizer.pad_token_id] * (args.codegen_max_input_length -
-                                                                 len(model_inputs["input_ids"]))
+
+        padding_len = args.codegen_max_input_length - len(model_inputs["input_ids"])
+        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [tokenizer.pad_token_id] * padding_len
+        model_inputs["input_ids"] = model_inputs["input_ids"] + [tokenizer.pad_token_id] * padding_len
+
         labels = tokenizer(example["target"],
                            truncation=True,
                            padding="max_length",
                            max_length=args.codegen_max_target_length)
-        labels = labels["input_ids"]
-        labels[labels == tokenizer.pad_token_id] = -100
+        labels = labels.input_ids
+        labels = [label if label != tokenizer.pad_token_id else -100 for label in labels]
         model_inputs["labels"] = labels
         return model_inputs
 
@@ -322,8 +312,6 @@ def train_code_generation(args):
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="no",
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(

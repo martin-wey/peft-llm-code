@@ -72,18 +72,23 @@ def test_devign_defect_detection(args):
         logger.info(f"Accuracy: {round(accuracy * 100, 2)}%")
     else:
         def preprocess_function_dec(example):
-            suffix = tokenizer(" Labels : ")
-            labels = tokenizer(example["text_label"]).input_ids
+            suffix = tokenizer(" Label : ")
+            label = tokenizer(example["text_label"]).input_ids
             max_input_len = args.defect_max_seq_length - len(suffix.input_ids)
-            # perform truncation only on the code to avoid truncating the suffix and labels
-            inputs = tokenizer(example["func"],
-                               truncation=True,
-                               max_length=max_input_len)
-            input_ids = inputs.input_ids + suffix.input_ids
-            attention_mask = [0] * (args.defect_max_seq_length - len(input_ids)) + [1] * len(input_ids)
-            input_ids = [tokenizer.pad_token_id] * (args.defect_max_seq_length - len(input_ids)) + input_ids
+            # perform truncation only on the code to avoid truncating the suffix and label
+            model_inputs = tokenizer(example["func"],
+                                     truncation=True,
+                                     max_length=max_input_len)
+            model_inputs["input_ids"] = model_inputs["input_ids"] + suffix.input_ids
+            model_inputs["labels"] = label.input_ids
 
-            return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+            # left-padding
+            padding_len = args.defect_max_seq_length - len(model_inputs["input_ids"])
+            model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"])
+            model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"]
+            model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
+
+            return model_inputs
 
         def preprocess_function_encdec(examples):
             model_inputs = tokenizer(examples["func"],
@@ -142,31 +147,30 @@ def test_xlcost_code_translation(args):
         model.config.pad_token_id = model.config.eos_token_id
 
     def preprocess_function_dec(examples):
-        examples_inputs = [f"# {input_lang} -> {target_lang} : {input}"
+        examples_inputs = [f"{input_lang} -> {target_lang} : {input}"
                            for (input_lang, target_lang, input) in zip(examples["input_lang"],
                                                                        examples["target_lang"],
                                                                        examples["input"])]
-        tokenized_inputs = tokenizer(examples_inputs,
-                                     truncation=True,
-                                     max_length=args.translation_max_input_length - 1,
-                                     add_special_tokens=False)
-        input_ids = [input_ids + [tokenizer.eos_token_id] for input_ids in tokenized_inputs.input_ids]
-        attention_mask = [mask + [1] for mask in tokenized_inputs.attention_mask]
+        model_inputs = tokenizer(examples_inputs,
+                                 truncation=True,
+                                 max_length=args.translation_max_input_length - 1)
+        model_inputs["input_ids"] = [input_ids + [tokenizer.eos_token_id] for input_ids in model_inputs["input_ids"]]
+        model_inputs["attention_mask"] = [mask + [1] for mask in model_inputs["attention_mask"]]
 
-        # pad the sequences dynamically to the length of the longest sequence in the batch
-        max_len = max(len(ids) for ids in input_ids)
-        padded_input_ids = torch.tensor([[tokenizer.pad_token_id] * (max_len - len(ids)) + ids for ids in input_ids])
-        padded_attention_mask = torch.tensor([[0] * (max_len - len(mask)) + mask for mask in attention_mask])
-
+        model_inputs["input_ids"] = [[tokenizer.pad_token_id] * (args.translation_max_target_length - len(input_ids))
+                                     for input_ids in model_inputs["input_ids"]]
+        model_inputs["attention_mask"] = [[0] * (args.translation_max_target_length - len(mask))
+                                          for mask in model_inputs["attention_mask"]]
         labels = tokenizer(examples["target"],
                            truncation=True,
                            padding="max_length",
-                           max_length=args.translation_max_target_length).input_ids
+                           max_length=args.translation_max_target_length)
+        model_inputs["labels"] = labels.input_ids
 
-        return {"input_ids": padded_input_ids, "attention_mask": padded_attention_mask, "labels": labels}
+        return model_inputs
 
     def preprocess_function_encdec(examples):
-        examples_inputs = [f"# {input_lang} -> {target_lang} : {input}"
+        examples_inputs = [f"{input_lang} -> {target_lang} : {input}"
                            for (input_lang, target_lang, input) in zip(examples["input_lang"],
                                                                        examples["target_lang"],
                                                                        examples["input"])]
@@ -254,22 +258,27 @@ def test_code_generation(args):
         model.config.pad_token_id = model.config.eos_token_id
 
     def preprocess_function_dec(example):
-        suffix_ids = tokenizer(f" Code ({example['target_lang']}) : ").input_ids
-        tokenized_input = tokenizer(example["input"],
-                                    truncation=True,
-                                    max_length=args.codegen_max_input_length - len(suffix_ids) - 1)
+        suffix = tokenizer(f" Code {example['target_lang']} : ")
+        max_input_len = args.codegen_max_input_length - len(suffix.input_ids) - 1
+        model_inputs = tokenizer(example["input"],
+                                 truncation=True,
+                                 max_length=max_input_len)
+        model_inputs["input_ids"] = model_inputs["input_ids"] + suffix.input_ids + [tokenizer.eos_token_id]
+
+        padding_len = args.codegen_max_input_length - len(model_inputs["input_ids"])
+        model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
+        model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"]
+
         labels = tokenizer(example["target"],
                            truncation=True,
                            padding="max_length",
                            max_length=args.codegen_max_target_length)
-        input_ids = tokenized_input.input_ids + suffix_ids + [tokenizer.eos_token_id]
-        attention_mask = [0] * (args.codegen_max_input_length - len(input_ids)) + [1] * len(input_ids)
-        input_ids = [tokenizer.pad_token_id] * (args.codegen_max_input_length - len(input_ids)) + input_ids
+        model_inputs["labels"] = labels.input_ids
 
-        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels.input_ids}
+        return model_inputs
 
     def preprocess_function_encdec(example):
-        suffix = tokenizer(f" Code ({example['target_lang']}) : ", add_special_tokens=False)
+        suffix = tokenizer(f" Code {example['target_lang']} : ", add_special_tokens=False)
         model_inputs = tokenizer(example["input"],
                                  truncation=True,
                                  max_length=args.codegen_max_input_length - len(suffix.input_ids) - 2,
@@ -277,10 +286,11 @@ def test_code_generation(args):
         model_inputs["input_ids"] = [tokenizer.cls_token_id] + \
                                     model_inputs["input_ids"] + suffix.input_ids + \
                                     [tokenizer.eos_token_id]
-        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [tokenizer.pad_token_id] * \
-                                         (args.codegen_max_input_length - len(model_inputs["input_ids"]))
-        model_inputs["input_ids"] += [tokenizer.pad_token_id] * (args.codegen_max_input_length -
-                                                                 len(model_inputs["input_ids"]))
+
+        padding_len = args.codegen_max_input_length - len(model_inputs["input_ids"])
+        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [tokenizer.pad_token_id] * padding_len
+        model_inputs["input_ids"] = model_inputs["input_ids"] + [tokenizer.pad_token_id] * padding_len
+
         labels = tokenizer(example["target"],
                            truncation=True,
                            padding="max_length",

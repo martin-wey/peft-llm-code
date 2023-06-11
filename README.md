@@ -25,13 +25,15 @@
 1. Medium-sized PLMs
     1. CodeBERT
     2. GraphCodeBERT
-    3. CodeT5
+    3. CodeT5-base
+    4. CodeT5+
 2. LLMs (from 1B to 12B)
     1. Bloom
     2. InCoder
     3. CodeGen
     4. CodeT5+
     5. PolyCoder
+    6. CodeT5-large 
 
 ## Setup
 
