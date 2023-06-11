@@ -102,6 +102,7 @@ def load_concode_code_generation_dataset(base_dir, train_samples_percentage=1):
 
         ds = ds.rename_column("nl", "input")
         ds = ds.rename_column("code", "target")
+        ds = ds.add_column("target_lang", ["Java"] * len(ds))
         datasets[split] = ds
     return DatasetDict(datasets)
 

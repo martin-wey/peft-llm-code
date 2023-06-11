@@ -19,14 +19,13 @@ def main(args):
         if args.do_test:
             logger.info(f"Testing model {args.model_name_or_path} on code translation.")
             test_xlcost_code_translation(args)
-    elif args.task == "xlcost_code_generation":
+    elif args.task == "xlcost_code_generation" or args.task == "concode_code_generation":
         if args.do_train:
-            logger.info(f"Running fine-tuning of {args.model_name_or_path} for code generation (XLCoST).")
-            train_xlcost_code_generation(args)
-    elif args.task == "concode_code_generation":
-        if args.do_train:
-            logger.info(f"Running fine-tuning of {args.model_name_or_path} for code generation (concode).")
-            train_concode_code_generation(args)
+            logger.info(f"Running fine-tuning of {args.model_name_or_path} for code generation ({args.task.split('_')[0]}).")
+            train_code_generation(args)
+        if args.do_test:
+            logger.info(f"Testing model {args.model_name_or_path} on code generation ({args.task.split('_')[0]}).")
+            test_code_generation(args)
     elif args.task == "devign_defect_detection":
         if args.do_train:
             logger.info(f"Running fine-tuning of {args.model_name_or_path} for defect detection.")
@@ -54,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", default=5e-5, type=float)
     parser.add_argument("--weight_decay", default=0, type=float)
     parser.add_argument("--num_epochs", default=5, type=float)
+    parser.add_argument("--patience", default=2, type=int)
 
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
 

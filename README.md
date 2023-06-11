@@ -16,9 +16,9 @@
 | xlcost_code_translation | train      | /       | ✅  |     ✅            |
 |                         | test       | /       | ✅     |     ✅            |
 | xlcost_code_generation  | train      | /       | ✅   | ✅           |
-|                         | test       | /       | ❌     | ❌             |
-| concode_code_generation | train      | /       | ❌   | ❌           |
-|                         | test       | /       | ❌     | ❌             |
+|                         | test       | /       | ✅     | ✅             |
+| concode_code_generation | train      | /       | ✅   | ✅           |
+|                         | test       | /       | ✅     | ✅             |
 
 ## Studied PLMs and LLMs
 

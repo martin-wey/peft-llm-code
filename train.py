@@ -8,14 +8,16 @@ from transformers import \
     Trainer, \
     Seq2SeqTrainingArguments, \
     Seq2SeqTrainer, \
-    TrainerCallback
+    TrainerCallback, \
+    EarlyStoppingCallback
 
 from utils import *
 
 
 class SaveModelCallback(TrainerCallback):
-    def __init__(self, output_dir):
+    def __init__(self, output_dir, tokenizer):
         self.output_dir = output_dir
+        self.tokenizer = tokenizer
 
     def on_epoch_end(self, args, state, control, model=None, **kwargs):
         checkpoint_dir = os.path.join(self.output_dir, f"checkpoint_{state.global_step}")
@@ -116,6 +118,8 @@ def train_devign_defect_detection(args):
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="no",
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -125,7 +129,7 @@ def train_devign_defect_detection(args):
         eval_dataset=dataset["valid"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer), EarlyStoppingCallback(args.patience)]
     )
     trainer.train()
 
@@ -212,6 +216,8 @@ def train_xlcost_code_translation(args):
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="no",
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -221,13 +227,16 @@ def train_xlcost_code_translation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer), EarlyStoppingCallback(args.patience)]
     )
     trainer.train()
 
 
-def train_xlcost_code_generation(args):
-    dataset = load_xlcost_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.50)
+def train_code_generation(args):
+    if args.task == "xlcost_code_generation":
+        dataset = load_xlcost_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.50)
+    else:
+        dataset = load_concode_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.25)
     del dataset["test"]
 
     model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
@@ -274,11 +283,18 @@ def train_xlcost_code_generation(args):
         return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
     def preprocess_function_encdec(example):
-        examples_inputs = f"{example['input']} Code ({example['target_lang']}) : "
-        model_inputs = tokenizer(examples_inputs,
+        suffix = tokenizer(f" Code ({example['target_lang']}) : ", add_special_tokens=False)
+        model_inputs = tokenizer(example["input"],
                                  truncation=True,
-                                 padding="max_length",
-                                 max_length=args.codegen_max_input_length)
+                                 max_length=args.codegen_max_input_length - len(suffix.input_ids) - 2,
+                                 add_special_tokens=False)
+        model_inputs["input_ids"] = [tokenizer.cls_token_id] + \
+                                    model_inputs["input_ids"] + suffix.input_ids + \
+                                    [tokenizer.eos_token_id]
+        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [tokenizer.pad_token_id] * \
+                                         (args.codegen_max_input_length - len(model_inputs["input_ids"]))
+        model_inputs["input_ids"] += [tokenizer.pad_token_id] * (args.codegen_max_input_length -
+                                                                 len(model_inputs["input_ids"]))
         labels = tokenizer(example["target"],
                            truncation=True,
                            padding="max_length",
@@ -307,6 +323,8 @@ def train_xlcost_code_generation(args):
         logging_strategy="steps",
         logging_steps=100,
         save_strategy="no",
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -316,13 +334,6 @@ def train_xlcost_code_generation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer), EarlyStoppingCallback(args.patience)]
     )
     trainer.train()
-
-
-def train_concode_code_generation(args):
-    dataset = load_concode_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.25)
-    del dataset["test"]
-
-    print(dataset["train"][1000])
