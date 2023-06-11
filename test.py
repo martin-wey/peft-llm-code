@@ -258,7 +258,7 @@ def test_code_generation(args):
         model.config.pad_token_id = model.config.eos_token_id
 
     def preprocess_function_dec(example):
-        suffix = tokenizer(f" Code {example['target_lang']} : ")
+        suffix = tokenizer(f" Code ({example['target_lang']}) : ")
         max_input_len = args.codegen_max_input_length - len(suffix.input_ids) - 1
         model_inputs = tokenizer(example["input"],
                                  truncation=True,
@@ -267,7 +267,8 @@ def test_code_generation(args):
 
         padding_len = args.codegen_max_input_length - len(model_inputs["input_ids"])
         model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
-        model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"]
+        model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"] \
+                                         + suffix.attention_mask + [1]
 
         labels = tokenizer(example["target"],
                            truncation=True,
@@ -278,7 +279,7 @@ def test_code_generation(args):
         return model_inputs
 
     def preprocess_function_encdec(example):
-        suffix = tokenizer(f" Code {example['target_lang']} : ", add_special_tokens=False)
+        suffix = tokenizer(f" Code ({example['target_lang']}) : ", add_special_tokens=False)
         model_inputs = tokenizer(example["input"],
                                  truncation=True,
                                  max_length=args.codegen_max_input_length - len(suffix.input_ids) - 2,
@@ -296,6 +297,7 @@ def test_code_generation(args):
                            padding="max_length",
                            max_length=args.codegen_max_target_length)
         model_inputs["labels"] = labels["input_ids"]
+
         return model_inputs
 
     preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
@@ -340,5 +342,5 @@ def test_code_generation(args):
     with open(os.path.join(args.run_dir, f"predictions.txt"), "w", encoding="utf-8") as fpred, \
             open(os.path.join(args.run_dir, f"references.txt"), "w", encoding="utf-8") as fref:
         for prediction, reference, dataset in zip(predictions, references, test_dataset):
-            fpred.write(dataset["target_lang"] + " | " + prediction.replace("\n", "") + "\n")
-            fref.write(dataset["target_lang"] + " | " + reference.replace("\n", "") + "\n")
+            fpred.write("text;" + dataset["target_lang"] + " | " + prediction.replace("\n", "") + "\n")
+            fref.write("text;" + dataset["target_lang"] + " | " + reference.replace("\n", "") + "\n")

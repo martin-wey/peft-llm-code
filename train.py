@@ -244,7 +244,7 @@ def train_code_generation(args):
         model.config.pad_token_id = model.config.eos_token_id
 
     def preprocess_function_dec(example):
-        suffix = tokenizer(f" Code {example['target_lang']} : ")
+        suffix = tokenizer(f" Code ({example['target_lang']}) : ")
         max_input_len = args.codegen_max_input_length - len(suffix.input_ids) - 1
         # perform truncation only on the code to avoid truncating the suffix
         model_inputs = tokenizer(example["input"],
@@ -271,7 +271,7 @@ def train_code_generation(args):
         return model_inputs
 
     def preprocess_function_encdec(example):
-        suffix = tokenizer(f" Code {example['target_lang']} : ", add_special_tokens=False)
+        suffix = tokenizer(f" Code ({example['target_lang']}) : ", add_special_tokens=False)
         model_inputs = tokenizer(example["input"],
                                  truncation=True,
                                  max_length=args.codegen_max_input_length - len(suffix.input_ids) - 2,
