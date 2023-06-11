@@ -8,8 +8,7 @@ from transformers import \
     Trainer, \
     Seq2SeqTrainingArguments, \
     Seq2SeqTrainer, \
-    TrainerCallback, \
-    EarlyStoppingCallback
+    TrainerCallback
 
 from utils import *
 
@@ -129,7 +128,7 @@ def train_devign_defect_detection(args):
         eval_dataset=dataset["valid"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer), EarlyStoppingCallback(args.patience)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer)]
     )
     trainer.train()
 
@@ -227,7 +226,7 @@ def train_xlcost_code_translation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer), EarlyStoppingCallback(args.patience)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer)]
     )
     trainer.train()
 
@@ -334,6 +333,6 @@ def train_code_generation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer), EarlyStoppingCallback(args.patience)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer)]
     )
     trainer.train()

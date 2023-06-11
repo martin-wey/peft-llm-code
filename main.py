@@ -53,7 +53,6 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", default=5e-5, type=float)
     parser.add_argument("--weight_decay", default=0, type=float)
     parser.add_argument("--num_epochs", default=5, type=float)
-    parser.add_argument("--patience", default=2, type=int)
 
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
 
@@ -93,6 +92,6 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(project=args.wandb_project_name, name=args.run_name, group=args.task)
+        wandb.init(project=args.wandb_project_name, name=args.run_name, group=args.task, mode="offline")
 
     main(args)
