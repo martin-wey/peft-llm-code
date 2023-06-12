@@ -94,7 +94,7 @@ def load_concode_code_generation_dataset(base_dir, train_samples_percentage=1):
     dataset_dir = os.path.join(base_dir, dataset_name)
 
     datasets = {}
-    for split in tqdm(["train", "valid", "test"], desc="Loading CONCODE code generation dataset"):
+    for split in tqdm(["train", "val", "test"], desc="Loading CONCODE code generation dataset"):
         ds = Dataset.from_json(f"{dataset_dir}/{split}.json")
 
         if split == "train":

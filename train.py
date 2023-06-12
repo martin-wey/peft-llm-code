@@ -1,6 +1,6 @@
 import os.path
 
-from peft import get_peft_model, LoraConfig, TaskType
+from peft import get_peft_model, TaskType, PromptEncoderConfig
 from transformers import \
     AutoTokenizer, \
     default_data_collator, \
@@ -11,6 +11,20 @@ from transformers import \
     TrainerCallback
 
 from utils import *
+
+
+def load_model_and_tokenizer(args):
+    peft_task_type = TaskType.SEQ_2_SEQ_LM if args.model_type == "encoder-decoder" else TaskType.CAUSAL_LM
+    if args.training_method == "ft":
+        model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    elif args.training_method == "p-tuning":
+        peft_config = PromptEncoderConfig(task_type=peft_task_type, num_virtual_tokens=30, encoder_hidden_size=1024)
+        model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
+    return model.to(args.device), tokenizer
 
 
 class SaveModelCallback(TrainerCallback):
@@ -30,8 +44,7 @@ def train_devign_defect_detection(args):
     dataset = load_devign_defect_detection_dataset(args.dataset_dir)
     del dataset["test"]
 
-    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    model, tokenizer = load_model_and_tokenizer(args)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
@@ -130,18 +143,7 @@ def train_xlcost_code_translation(args):
     dataset = load_xlcost_code_translation_dataset(args.dataset_dir, train_samples_percentage=0.25)
     del dataset["test"]
 
-    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
-    if args.training_method == "lora":
-        task_type = TaskType.CAUSAL_LM if args.model_type == "decoder" else TaskType.SEQ_2_SEQ_LM
-        peft_config = LoraConfig(task_type=task_type,
-                                 inference_mode=False,
-                                 r=16,
-                                 lora_alpha=32,
-                                 lora_dropout=0.0)
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-
+    model, tokenizer = load_model_and_tokenizer(args)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
@@ -227,18 +229,7 @@ def train_code_generation(args):
         dataset = load_concode_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.25)
     del dataset["test"]
 
-    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
-    if args.training_method == "lora":
-        task_type = TaskType.CAUSAL_LM if args.model_type == "decoder" else TaskType.SEQ_2_SEQ_LM
-        peft_config = LoraConfig(task_type=task_type,
-                                 inference_mode=False,
-                                 r=8,
-                                 lora_alpha=32,
-                                 lora_dropout=0.1)
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-
+    model, tokenizer = load_model_and_tokenizer(args)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
