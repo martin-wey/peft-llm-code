@@ -39,7 +39,7 @@ LANG_TO_EXT = {
 
 
 def load_xlcost_code_translation_dataset(base_dir, train_samples_percentage=1):
-    dataset_name = "xlcost_code-translation"
+    dataset_name = "xlcost_code_translation"
     dataset_dir = os.path.join(base_dir, dataset_name)
     lang_pairs = os.listdir(dataset_dir)
 
@@ -68,7 +68,7 @@ def load_xlcost_code_translation_dataset(base_dir, train_samples_percentage=1):
 
 
 def load_xlcost_code_generation_dataset(base_dir, train_samples_percentage=1):
-    dataset_name = "xlcost_code-generation"
+    dataset_name = "xlcost_code_generation"
     dataset_dir = os.path.join(base_dir, dataset_name)
     lang_pairs = os.listdir(dataset_dir)
 
@@ -95,7 +95,7 @@ def load_xlcost_code_generation_dataset(base_dir, train_samples_percentage=1):
 
 
 def load_concode_code_generation_dataset(base_dir, train_samples_percentage=1):
-    dataset_name = "concode_code-generation"
+    dataset_name = "concode_code_generation"
     dataset_dir = os.path.join(base_dir, dataset_name)
 
     datasets = {}
@@ -113,7 +113,7 @@ def load_concode_code_generation_dataset(base_dir, train_samples_percentage=1):
 
 
 def load_devign_defect_detection_dataset(base_dir):
-    dataset_name = "devign_defect-detection"
+    dataset_name = "devign_defect_detection"
     dataset_dir = os.path.join(base_dir, dataset_name)
 
     datasets = {}

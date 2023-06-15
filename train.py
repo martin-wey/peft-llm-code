@@ -49,7 +49,7 @@ class SaveModelCallback(TrainerCallback):
         self.tokenizer = tokenizer
 
     def on_epoch_end(self, args, state, control, model=None, **kwargs):
-        checkpoint_dir = os.path.join(self.output_dir, f"checkpoint_{state.global_step}")
+        checkpoint_dir = os.path.join(self.output_dir, f"checkpoint_ep{int(state.epoch)}")
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
         model.save_pretrained(checkpoint_dir)
@@ -139,7 +139,8 @@ def train_devign_defect_detection(args):
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=50,
-        save_strategy="no",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -221,7 +222,8 @@ def train_xlcost_code_translation(args):
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=50,
-        save_strategy="no",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
@@ -317,7 +319,8 @@ def train_code_generation(args):
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=50,
-        save_strategy="no",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
         report_to="wandb" if args.use_wandb else "none"
     )
     trainer = trainer_cls(
