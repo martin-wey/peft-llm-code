@@ -1,7 +1,7 @@
 import logging
 
 import torch
-from peft import PeftConfig, PeftModel
+from peft import PeftModel
 from torch.utils.data import DataLoader
 from transformers import \
     AutoTokenizer, \
@@ -21,10 +21,11 @@ def load_model_and_tokenizer(args):
         model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path).to(args.device)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     elif args.training_method == "lora":
-        peft_config = PeftConfig.from_pretrained(args.model_name_or_path)
-        inference_model = GENERATION_MODEL_CLS[args.model_type].from_pretrained("NinedayWang/PolyCoder-2.7B")
-        tokenizer = AutoTokenizer.from_pretrained("NinedayWang/PolyCoder-2.7B")
-        model = PeftModel.from_pretrained(inference_model, args.model_name_or_path).to(args.device)
+        inference_model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
+                                                                                torch_dtype=torch.float16)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+        model = PeftModel.from_pretrained(inference_model, args.lora_adapter_path).to(args.device)
+        model.eval()
     return model, tokenizer
 
 

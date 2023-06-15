@@ -1,6 +1,6 @@
 import os.path
 
-from peft import get_peft_model, TaskType, PromptEncoderConfig, LoraConfig
+from peft import get_peft_model, TaskType, LoraConfig
 from transformers import \
     AutoTokenizer, \
     default_data_collator, \
@@ -8,7 +8,8 @@ from transformers import \
     Trainer, \
     Seq2SeqTrainingArguments, \
     Seq2SeqTrainer, \
-    TrainerCallback
+    TrainerCallback, \
+    EarlyStoppingCallback
 
 from utils import *
 
@@ -18,15 +19,9 @@ def load_model_and_tokenizer(args):
     if args.training_method == "ft":
         model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-    elif args.training_method == "p-tuning":
-        peft_config = PromptEncoderConfig(task_type=peft_task_type, num_virtual_tokens=30, encoder_hidden_size=1024)
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
     elif args.training_method == "lora":
         model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
-                                                                      trust_remote_code=True,)
+                                                                      trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         peft_config = LoraConfig(task_type=peft_task_type,
                                  r=args.lora_r,
@@ -138,12 +133,12 @@ def train_devign_defect_detection(args):
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.val_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.num_epochs,
+        num_train_epochs=args.max_num_epochs,
         weight_decay=args.weight_decay,
-        fp16=True,
+        fp16=args.fp16,
         evaluation_strategy="epoch",
         logging_strategy="steps",
-        logging_steps=100,
+        logging_steps=50,
         save_strategy="no",
         report_to="wandb" if args.use_wandb else "none"
     )
@@ -154,7 +149,8 @@ def train_devign_defect_detection(args):
         eval_dataset=dataset["valid"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer),
+                   EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
     trainer.train()
 
@@ -219,12 +215,12 @@ def train_xlcost_code_translation(args):
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.val_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.num_epochs,
+        num_train_epochs=args.max_num_epochs,
         weight_decay=args.weight_decay,
-        fp16=True,
+        fp16=args.fp16,
         evaluation_strategy="epoch",
         logging_strategy="steps",
-        logging_steps=100,
+        logging_steps=50,
         save_strategy="no",
         report_to="wandb" if args.use_wandb else "none"
     )
@@ -235,7 +231,8 @@ def train_xlcost_code_translation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer),
+                   EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
     trainer.train()
 
@@ -314,12 +311,12 @@ def train_code_generation(args):
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.val_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.num_epochs,
+        num_train_epochs=args.max_num_epochs,
         weight_decay=args.weight_decay,
-        fp16=True,
+        fp16=args.fp16,
         evaluation_strategy="epoch",
         logging_strategy="steps",
-        logging_steps=100,
+        logging_steps=50,
         save_strategy="no",
         report_to="wandb" if args.use_wandb else "none"
     )
@@ -330,6 +327,7 @@ def train_code_generation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer)]
+        callbacks=[SaveModelCallback(args.run_dir, tokenizer),
+                   EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
     trainer.train()

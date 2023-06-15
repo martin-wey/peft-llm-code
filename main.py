@@ -48,12 +48,14 @@ if __name__ == "__main__":
     parser.add_argument("--task", default="devign_defect_detection", type=str,
                         help="Task on which to fine-tune the model.")
     parser.add_argument("--training_method", default="ft", type=str, help="Method used to fine-tuning the model.")
-    parser.add_argument("--train_batch_size", default=32, type=int)
-    parser.add_argument("--val_batch_size", default=32, type=int)
+    parser.add_argument("--train_batch_size", default=16, type=int)
+    parser.add_argument("--val_batch_size", default=16, type=int)
     parser.add_argument("--learning_rate", default=5e-5, type=float)
-    parser.add_argument("--weight_decay", default=0, type=float)
-    parser.add_argument("--num_epochs", default=5, type=float)
+    parser.add_argument("--weight_decay", default=0.0, type=float)
+    parser.add_argument("--max_num_epochs", default=10, type=float)
     parser.add_argument("--gradient_accumulation_steps", default=0, type=int)
+    parser.add_argument("--fp16", default=False, type=bool)
+    parser.add_argument("--patience", default=2, type=int)
 
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
 
@@ -67,6 +69,7 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", default=0.7, type=float)
     parser.add_argument("--beam_size", default=5, type=int)
 
+    parser.add_argument("--lora_adapter_path", default=None, type=str)
     parser.add_argument("--lora_r", default=8, type=int)
     parser.add_argument("--lora_alpha", default=16, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)
