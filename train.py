@@ -1,5 +1,6 @@
 import os.path
 
+import torch
 from peft import get_peft_model, TaskType, LoraConfig
 from transformers import \
     AutoTokenizer, \
@@ -21,6 +22,7 @@ def load_model_and_tokenizer(args):
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     elif args.training_method == "lora":
         model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
+                                                                      torch_dtype=torch.float16,
                                                                       trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         peft_config = LoraConfig(task_type=peft_task_type,
