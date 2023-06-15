@@ -53,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", default=5e-5, type=float)
     parser.add_argument("--weight_decay", default=0, type=float)
     parser.add_argument("--num_epochs", default=5, type=float)
+    parser.add_argument("--gradient_accumulation_steps", default=0, type=int)
 
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
 
@@ -66,6 +67,11 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", default=0.7, type=float)
     parser.add_argument("--beam_size", default=5, type=int)
 
+    parser.add_argument("--lora_r", default=8, type=int)
+    parser.add_argument("--lora_alpha", default=16, type=int)
+    parser.add_argument("--lora_dropout", default=0.05, type=float)
+    parser.add_argument("--lora_bias", default="none", type=str)
+
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
@@ -78,6 +84,7 @@ if __name__ == "__main__":
     set_seed(args.seed)
 
     # Setup logging and output directories
+    args.model_name = args.model_name_or_path.split('/')[-1]
     if args.do_train:
         args.run_name = f"{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
         args.run_dir = Path(f"{args.output_dir}/{args.task}/{args.run_name}")

@@ -1,6 +1,6 @@
 import os.path
 
-from peft import get_peft_model, TaskType, PromptEncoderConfig
+from peft import get_peft_model, TaskType, PromptEncoderConfig, LoraConfig
 from transformers import \
     AutoTokenizer, \
     default_data_collator, \
@@ -16,15 +16,36 @@ from utils import *
 def load_model_and_tokenizer(args):
     peft_task_type = TaskType.SEQ_2_SEQ_LM if args.model_type == "encoder-decoder" else TaskType.CAUSAL_LM
     if args.training_method == "ft":
-        model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
+        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     elif args.training_method == "p-tuning":
         peft_config = PromptEncoderConfig(task_type=peft_task_type, num_virtual_tokens=30, encoder_hidden_size=1024)
-        model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
+        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, device_map="auto")
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-    return model.to(args.device), tokenizer
+    elif args.training_method == "lora":
+        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
+                                                                      trust_remote_code=True,)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+        peft_config = LoraConfig(task_type=peft_task_type,
+                                 r=args.lora_r,
+                                 lora_alpha=args.lora_alpha,
+                                 target_modules=LORA_TARGET_MODULES[args.model_name],
+                                 lora_dropout=args.lora_dropout,
+                                 bias=args.lora_bias)
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
+
+    if getattr(tokenizer, "pad_token_id") is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        model.config.pad_token_id = model.config.eos_token_id
+
+    if getattr(tokenizer, "cls_token_id") is None:
+        tokenizer.cls_token_id = tokenizer.bos_token_id
+        model.config.cls_token_id = model.config.bos_token_id
+
+    return model, tokenizer
 
 
 class SaveModelCallback(TrainerCallback):
@@ -45,9 +66,6 @@ def train_devign_defect_detection(args):
     del dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
-    if getattr(tokenizer, "pad_token_id") is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-        model.config.pad_token_id = model.config.eos_token_id
 
     if args.model_type == "encoder":
         def preprocess_function(examples):
@@ -119,8 +137,10 @@ def train_devign_defect_detection(args):
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.val_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.num_epochs,
         weight_decay=args.weight_decay,
+        fp16=True,
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=100,
@@ -144,10 +164,6 @@ def train_xlcost_code_translation(args):
     del dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
-    if getattr(tokenizer, "pad_token_id") is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-        model.config.pad_token_id = model.config.eos_token_id
-
     def preprocess_function_dec(example):
         # we inform the model what are the input and target languages
         #   by defining a prefix as follow: # {input_lang} -> {target_lang}
@@ -202,8 +218,10 @@ def train_xlcost_code_translation(args):
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.val_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.num_epochs,
         weight_decay=args.weight_decay,
+        fp16=True,
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=100,
@@ -230,10 +248,6 @@ def train_code_generation(args):
     del dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
-    if getattr(tokenizer, "pad_token_id") is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-        model.config.pad_token_id = model.config.eos_token_id
-
     def preprocess_function_dec(example):
         suffix = tokenizer(f" Code ({example['target_lang']}) : ")
         max_input_len = args.codegen_max_input_length - len(suffix.input_ids) - 1
@@ -272,13 +286,15 @@ def train_code_generation(args):
                                     [tokenizer.eos_token_id]
 
         padding_len = args.codegen_max_input_length - len(model_inputs["input_ids"])
-        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [tokenizer.pad_token_id] * padding_len
+        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [0] * padding_len
         model_inputs["input_ids"] = model_inputs["input_ids"] + [tokenizer.pad_token_id] * padding_len
 
         labels = tokenizer(example["target"],
                            truncation=True,
                            padding="max_length",
-                           max_length=args.codegen_max_target_length)
+                           max_length=args.codegen_max_target_length,
+                           add_special_tokens=True)
+
         labels = labels.input_ids
         labels = [label if label != tokenizer.pad_token_id else -100 for label in labels]
         model_inputs["labels"] = labels
@@ -297,8 +313,10 @@ def train_code_generation(args):
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.val_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.num_epochs,
         weight_decay=args.weight_decay,
+        fp16=True,
         evaluation_strategy="epoch",
         logging_strategy="steps",
         logging_steps=100,

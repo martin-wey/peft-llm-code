@@ -16,6 +16,18 @@ logger = logging.getLogger(__name__)
 EOF_STRINGS = ["<|endoftext|>", "</s>"]
 
 
+def load_model_and_tokenizer(args):
+    if args.training_method == "ft":
+        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path).to(args.device)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    elif args.training_method == "lora":
+        peft_config = PeftConfig.from_pretrained(args.model_name_or_path)
+        inference_model = GENERATION_MODEL_CLS[args.model_type].from_pretrained("NinedayWang/PolyCoder-2.7B")
+        tokenizer = AutoTokenizer.from_pretrained("NinedayWang/PolyCoder-2.7B")
+        model = PeftModel.from_pretrained(inference_model, args.model_name_or_path).to(args.device)
+    return model, tokenizer
+
+
 class EndOfFunctionCriteria(StoppingCriteria):
     """Custom `StoppingCriteria` which checks if all generated functions in the batch are completed."""
 
@@ -37,8 +49,7 @@ def test_devign_defect_detection(args):
     dataset = load_devign_defect_detection_dataset(args.dataset_dir)
     test_dataset = dataset["test"]
 
-    model = DEFECT_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path).to(args.device)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    model, tokenizer = load_model_and_tokenizer(args)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
@@ -73,7 +84,7 @@ def test_devign_defect_detection(args):
     else:
         def preprocess_function_dec(example):
             suffix = tokenizer(" Label : ")
-            label = tokenizer(example["text_label"]).input_ids
+            label = tokenizer(example["text_label"])
             max_input_len = args.defect_max_seq_length - len(suffix.input_ids)
             # perform truncation only on the code to avoid truncating the suffix and label
             model_inputs = tokenizer(example["func"],
@@ -140,8 +151,7 @@ def test_xlcost_code_translation(args):
     dataset = load_xlcost_code_translation_dataset(args.dataset_dir)
     test_dataset = dataset["test"]
 
-    model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path).to(args.device)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    model, tokenizer = load_model_and_tokenizer(args)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
@@ -244,15 +254,7 @@ def test_code_generation(args):
         dataset = load_concode_code_generation_dataset(args.dataset_dir)
     test_dataset = dataset["test"]
 
-    if args.training_method == "lora":
-        config = PeftConfig.from_pretrained(args.model_name_or_path)
-        inference_model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(config.base_model_name_or_path)
-        tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
-        model = PeftModel.from_pretrained(inference_model, args.model_name_or_path)
-    else:
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path).to(args.device)
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-
+    model, tokenizer = load_model_and_tokenizer(args)
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id

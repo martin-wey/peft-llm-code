@@ -67,6 +67,7 @@ def main():
         bleu_score = corpus_bleu(references, predictions, smoothing_function=sm_func, ignoring=None)
         crystalbleu_score = corpus_bleu(references, predictions, smoothing_function=sm_func,
                                         ignoring=trivially_shared_ngrams[lang])
+        print(f"[{lang}] CrystalBLEU: {(crystalbleu_score * 100)}")
         weighted_bleu += (len(predictions) / total_samples) * (bleu_score * 100)
         weighted_crystalbleu += (len(predictions) / total_samples) * (crystalbleu_score * 100)
     print(f"Weighted avg BLEU: {round(weighted_bleu, 2)}, Weighted avg CrystalBLEU: {round(weighted_crystalbleu, 2)}")
