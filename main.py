@@ -102,6 +102,6 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(project=args.wandb_project_name, name=args.run_name, group=args.task, mode="offline")
+        wandb.init(project=args.wandb_project_name, name=args.run_name, group=args.model_name, mode="offline")
 
     main(args)
