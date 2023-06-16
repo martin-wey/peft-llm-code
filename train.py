@@ -50,7 +50,7 @@ class SaveModelCallback(TrainerCallback):
         self.output_dir = output_dir
         self.tokenizer = tokenizer
 
-    def on_epoch_end(self, args, state, control, model=None, **kwargs):
+    def on_save(self, args, state, control, model=None, **kwargs):
         checkpoint_dir = os.path.join(self.output_dir, f"checkpoint_ep{int(state.epoch)}")
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)

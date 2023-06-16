@@ -10,7 +10,8 @@ from datasets import Dataset, DatasetDict, concatenate_datasets
 
 LORA_TARGET_MODULES = {
     "PolyCoder-2.7B": ["query_key_value", "xxx"],
-    "codegen-2B-multi": ["q_proj", "v_proj"]
+    "codegen-2B-multi": ["q_proj", "v_proj"],
+    "codet5-base": ["q", "v"]
 }
 
 DEFECT_MODEL_CLS = {
