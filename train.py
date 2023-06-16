@@ -138,10 +138,13 @@ def train_devign_defect_detection(args):
         num_train_epochs=args.max_num_epochs,
         weight_decay=args.weight_decay,
         fp16=args.fp16,
-        evaluation_strategy="epoch",
+        evaluation_strategy=args.evaluation_strategy,
+        eval_steps=args.eval_steps,
+        save_strategy=args.evaluation_strategy,
+        save_steps=args.eval_steps,
+        save_total_limit=5,
         logging_strategy="steps",
         logging_steps=50,
-        save_strategy="epoch",
         load_best_model_at_end=True,
         report_to="wandb" if args.use_wandb else "none"
     )
@@ -152,10 +155,12 @@ def train_devign_defect_detection(args):
         eval_dataset=dataset["valid"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer),
-                   EarlyStoppingCallback(early_stopping_patience=args.patience)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
     trainer.train()
+    # save best model after training
+    trainer.model.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
+    trainer.tokenizer.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
 
 
 def train_xlcost_code_translation(args):
@@ -221,10 +226,13 @@ def train_xlcost_code_translation(args):
         num_train_epochs=args.max_num_epochs,
         weight_decay=args.weight_decay,
         fp16=args.fp16,
-        evaluation_strategy="epoch",
+        evaluation_strategy=args.evaluation_strategy,
+        eval_steps=args.eval_steps,
+        save_strategy=args.evaluation_strategy,
+        save_steps=args.eval_steps,
+        save_total_limit=5,
         logging_strategy="steps",
         logging_steps=50,
-        save_strategy="epoch",
         load_best_model_at_end=True,
         report_to="wandb" if args.use_wandb else "none"
     )
@@ -235,10 +243,12 @@ def train_xlcost_code_translation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer),
-                   EarlyStoppingCallback(early_stopping_patience=args.patience)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
     trainer.train()
+    # save best model after training
+    trainer.model.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
+    trainer.tokenizer.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
 
 
 def train_code_generation(args):
@@ -317,11 +327,13 @@ def train_code_generation(args):
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_train_epochs=args.max_num_epochs,
         weight_decay=args.weight_decay,
-        fp16=args.fp16,
-        evaluation_strategy="epoch",
+        evaluation_strategy=args.evaluation_strategy,
+        eval_steps=args.eval_steps,
+        save_strategy=args.evaluation_strategy,
+        save_steps=args.eval_steps,
+        save_total_limit=5,
         logging_strategy="steps",
         logging_steps=50,
-        save_strategy="epoch",
         load_best_model_at_end=True,
         report_to="wandb" if args.use_wandb else "none"
     )
@@ -332,7 +344,9 @@ def train_code_generation(args):
         eval_dataset=dataset["val"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[SaveModelCallback(args.run_dir, tokenizer),
-                   EarlyStoppingCallback(early_stopping_patience=args.patience)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
     trainer.train()
+    # save best model after training
+    trainer.model.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
+    trainer.tokenizer.save_pretrained(f"{args.run_dir}/best_model_checkpoint")

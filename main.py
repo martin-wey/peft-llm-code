@@ -2,6 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
+import transformers
 import wandb
 from transformers import set_seed
 
@@ -56,6 +57,8 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulation_steps", default=1, type=int)
     parser.add_argument("--fp16", default=False, type=bool)
     parser.add_argument("--patience", default=2, type=int)
+    parser.add_argument("--evaluation_strategy", default="epoch", type=str, help="epoch or steps")
+    parser.add_argument("--eval_steps", default=500, type=int)
 
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
 
