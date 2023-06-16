@@ -341,6 +341,8 @@ def test_code_generation(args):
             predictions += [generated_tokens for generated_tokens in batch_generated_tokens]
             references += [tokens for tokens in batch_references]
 
+    if args.training_method == "lora":
+        args.run_dir = args.lora_adapter_path
     logger.info(f"Exporting test predictions in directory {args.run_dir}.")
     with open(os.path.join(args.run_dir, f"predictions.txt"), "w", encoding="utf-8") as fpred, \
             open(os.path.join(args.run_dir, f"references.txt"), "w", encoding="utf-8") as fref:
