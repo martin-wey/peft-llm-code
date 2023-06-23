@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from collections import defaultdict
@@ -18,11 +19,15 @@ from utils import *
 logger = logging.getLogger(__name__)
 
 EOF_STRINGS = ["<|endoftext|>", "</s>"]
+HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
 
 
 def load_model_and_tokenizer(args):
     if args.training_method == "ft":
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path).to(args.device)
+        kwargs = {}
+        if args.fp16:
+            kwargs["torch_dtype"] = torch.float16
+        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, **kwargs).to(args.device)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     else:
         inference_model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
@@ -38,6 +43,9 @@ def load_model_and_tokenizer(args):
     if "incoder" in args.model_name:
         tokenizer.eos_token_id = 2
         tokenizer.pad_token_id = 1
+
+    if args.model_type == "decoder":
+        tokenizer.padding_side = "left"
 
     return model, tokenizer
 
@@ -64,8 +72,6 @@ def test_conala_code_generation(args):
     test_dataset = dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
-    if args.model_type == "decoder":
-        tokenizer.padding_side = "left"
 
     def preprocess_function_dec(example):
         model_inputs = tokenizer(example["rewritten_intent"] + "\n",
@@ -150,16 +156,6 @@ def test_conala_code_generation(args):
             fref.write(reference.replace("\n", " ") + "\n")
 
 
-HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
-
-def remove_last_block(string):
-    """Remove the last block of the code containing EOF_STRINGS"""
-    string_list = re.split("(%s)" % "|".join(HUMAN_EVAL_EOF_STRINGS), string)
-    print(string_list)
-    # last string should be ""
-    return "".join(string_list[:-2])
-
-
 def test_human_eval(args):
     os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
@@ -170,11 +166,11 @@ def test_human_eval(args):
     if args.model_type == "decoder":
         tokenizer.padding_side = "left"
 
-    human_eval = human_eval.map(lambda e: tokenizer(e["prompt"] + "\n"),
-                                num_proc=args.num_workers,
-                                desc="Generating samples features.")["test"].select(range(2))
+    test_dataset = human_eval.map(lambda e: tokenizer(e["prompt"].strip()),
+                                  num_proc=args.num_workers,
+                                  desc="Generating samples features.")["test"]
 
-    dataloader = DataLoader(human_eval,
+    dataloader = DataLoader(test_dataset,
                             batch_size=1,
                             collate_fn=default_data_collator,
                             pin_memory=True)
@@ -184,32 +180,41 @@ def test_human_eval(args):
         with torch.no_grad():
             generated_sequences = model.generate(
                 input_ids=sample["input_ids"].to(args.device),
-                use_cache=True,
                 do_sample=True,
-                temperature=0.2,
+                temperature=args.temperature,
                 max_new_tokens=args.human_eval_max_new_tokens,
-                num_return_sequences=2,
+                num_return_sequences=args.human_eval_num_sequences,
                 stopping_criteria=StoppingCriteriaList(
                     [EndOfFunctionCriteria(sample["input_ids"].shape[1], HUMAN_EVAL_EOF_STRINGS, tokenizer)]
                 )
             )
             generated_sequences = generated_sequences.cpu().numpy()
-            for s in generated_sequences:
-                new_tokens = s[sample["input_ids"].shape[1]:]
-                new_tokens_decoded = tokenizer.decode(new_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-                string_list = re.split("(%s)" % "|".join(HUMAN_EVAL_EOF_STRINGS), new_tokens_decoded)
-                print(string_list)
+            func_signatures = generated_sequences[:, :sample["input_ids"].shape[1]]
+            new_tokens = generated_sequences[:, sample["input_ids"].shape[1]:]
 
-                gen_token_dict[step].append(s)
-                print("-" * 100)
-    """
-    code_gens = [[] for _ in range(len(human_eval))]
-    for task, generated_tokens in gen_token_dict.items():
-        for s in generated_tokens:
-            gen_code = tokenizer.decode(s, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-            print(gen_code)
-            print("-" * 100)
-            print(remove_last_block(gen_code))
-            print("*" * 100)
-            # code_gens[task].append(remove_last_block(gen_code))
-    """
+            for task, func_signatures, new_tokens in zip([step] * args.human_eval_num_sequences,
+                                                         func_signatures,
+                                                         new_tokens):
+                gen_token_dict[task].append((func_signatures, new_tokens))
+
+    code_gens = [[] for _ in range(len(test_dataset))]
+    for task, generations in gen_token_dict.items():
+        for (signature, gen_tokens) in generations:
+            func_sign = tokenizer.decode(signature, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+            gen_code = tokenizer.decode(gen_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+            gen_code = re.split("(%s)" % "|".join(HUMAN_EVAL_EOF_STRINGS), gen_code)[0]
+            code_gens[task].append(func_sign + gen_code)
+
+    references = []
+    for task in tqdm(range(len(test_dataset))):
+        test_func = human_eval["test"][task]["test"]
+        entry_point = f"check({human_eval['test'][task]['entry_point']})"
+        references.append("\n" + test_func + "\n" + entry_point)
+
+    pass_at_k, _ = code_eval_metric.compute(
+        references=references, predictions=code_gens, num_workers=args.num_workers, k=[1, 10, 100]
+    )
+    print(f"Results: {pass_at_k}")
+
+    with open(f"{args.run_dir}/human_eval.json", "w") as fp:
+        json.dump(pass_at_k, fp)

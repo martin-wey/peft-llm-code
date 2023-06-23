@@ -58,6 +58,7 @@ if __name__ == "__main__":
     parser.add_argument("--conala_max_target_length", default=64, type=int)
 
     parser.add_argument("--human_eval_max_new_tokens", default=256, type=int)
+    parser.add_argument("--human_eval_num_sequences", default=100, type=int)
 
     parser.add_argument("--temperature", default=0.7, type=float)
     parser.add_argument("--beam_size", default=5, type=int)
