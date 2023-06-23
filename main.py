@@ -31,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_dir", default="./datasets", type=str, help="Dataset base directory.")
     parser.add_argument("--output_dir", default="./runs", type=str, help="Output directory.")
 
-    parser.add_argument("--task", default="devign_defect_detection", type=str,
+    parser.add_argument("--task", default="conala_code_generation", type=str,
                         help="Task on which to fine-tune the model.")
     parser.add_argument("--training_method", default="ft", type=str, help="Method used to fine-tuning the model.")
 
@@ -45,14 +45,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_warmup_steps", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0)
     parser.add_argument("--fp16", type=bool, default=False)
-
-    parser.add_argument("--defect_max_seq_length", default=400, type=int)
-
-    parser.add_argument("--translation_max_input_length", default=256, type=int)
-    parser.add_argument("--translation_max_target_length", default=256, type=int)
-
-    parser.add_argument("--concode_max_input_length", default=256, type=int)
-    parser.add_argument("--concode_max_target_length", default=128, type=int)
 
     parser.add_argument("--conala_max_input_length", default=64, type=int)
     parser.add_argument("--conala_max_target_length", default=64, type=int)

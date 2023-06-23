@@ -120,7 +120,6 @@ def test_conala_code_generation(args):
             batch_generation = model.generate(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
-                use_cache=True,
                 temperature=args.temperature,
                 num_beams=args.beam_size,
                 max_new_tokens=args.conala_max_target_length,
@@ -140,17 +139,9 @@ def test_conala_code_generation(args):
             predictions += [generated_tokens for generated_tokens in batch_generated_tokens]
             references += [tokens for tokens in batch_references]
 
-            print("*" * 100)
-            print(batch_generated_tokens[0])
-            print("-" * 100)
-            print(batch_references[0])
-            print("*" * 100)
-
-    if args.training_method == "lora":
-        args.run_dir = args.lora_adapter_path
-    logger.info(f"Exporting test predictions in directory {args.run_dir}.")
-    with open(os.path.join(f"{args.run_dir}/predictions.txt"), "w", encoding="utf-8") as fpred, \
-            open(os.path.join(f"{args.run_dir}/references.txt"), "w", encoding="utf-8") as fref:
+    logger.info(f"Exporting test predictions in directory {args.output_dir}.")
+    with open(os.path.join(f"{args.output_dir}/predictions.txt"), "w", encoding="utf-8") as fpred, \
+            open(os.path.join(f"{args.output_dir}/references.txt"), "w", encoding="utf-8") as fref:
         for prediction, reference, dataset in zip(predictions, references, test_dataset):
             fpred.write(prediction.replace("\n", " ") + "\n")
             fref.write(reference.replace("\n", " ") + "\n")
@@ -216,5 +207,5 @@ def test_human_eval(args):
     )
     print(f"Results: {pass_at_k}")
 
-    with open(f"{args.run_dir}/human_eval.json", "w") as fp:
+    with open(f"{args.output_dir}/human_eval.json", "w") as fp:
         json.dump(pass_at_k, fp)
