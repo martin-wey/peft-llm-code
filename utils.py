@@ -6,12 +6,20 @@ from transformers import \
     AutoModelForSeq2SeqLM
 from tqdm import tqdm
 
-from datasets import Dataset, DatasetDict, concatenate_datasets
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 
 LORA_TARGET_MODULES = {
     "PolyCoder-2.7B": ["query_key_value", "xxx"],
-    "codegen-2B-multi": ["q_proj", "v_proj"],
-    "codet5-base": ["q", "v"]
+    "codegen-2B-mono": ["q_proj", "v_proj"],
+    "codegen-6B-mono": ["q_proj", "v_proj"],
+    "codegen-16B-mono": ["q_proj", "v_proj"],
+    "codegen-6B-multi": ["q_proj", "v_proj"],
+    "codet5p-2b": ["q_proj", "v_proj"],
+    "codet5p-6b": ["q_proj", "v_proj"],
+    "incoder-1B": ["q_proj", "v_proj"],
+    "incoder-6B": ["q_proj", "v_proj"],
+    "bloom-3b": ["query_key_value"],
+    "bloom-7b1": ["query_key_value"]
 }
 
 DEFECT_MODEL_CLS = {
@@ -108,7 +116,6 @@ def load_concode_code_generation_dataset(base_dir, train_samples_percentage=1):
 
         ds = ds.rename_column("nl", "input")
         ds = ds.rename_column("code", "target")
-        ds = ds.add_column("target_lang", ["Java"] * len(ds))
         datasets[split] = ds
     return DatasetDict(datasets)
 
@@ -122,3 +129,17 @@ def load_devign_defect_detection_dataset(base_dir):
         ds = Dataset.from_json(f"{dataset_dir}/{split}.jsonl")
         datasets[split] = ds
     return DatasetDict(datasets)
+
+
+def load_conala_dataset(args):
+    datasets = load_dataset("neulab/conala")
+    datasets = datasets.filter(lambda x: x["intent"] is not None)
+    datasets = datasets.filter(lambda x: x["rewritten_intent"] is not None)
+
+    train_val_datasets = datasets["train"].train_test_split(test_size=int(.1 * len(datasets["train"])),
+                                                            shuffle=True, seed=args.seed)
+    return DatasetDict({
+        "train": train_val_datasets["train"],
+        "val": train_val_datasets["test"],
+        "test": datasets["test"]
+    })

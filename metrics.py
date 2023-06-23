@@ -42,6 +42,7 @@ def main():
 
     references = [x.strip() for x in open(args.refs, encoding="utf-8").readlines()]
     predictions = [x.strip() for x in open(args.preds, encoding="utf-8").readlines()]
+
     data = {}
     total_samples = 0
     for ref, pred in zip(references, predictions):

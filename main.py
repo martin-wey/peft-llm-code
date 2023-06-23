@@ -2,40 +2,25 @@ import argparse
 import logging
 from pathlib import Path
 
-import transformers
 import wandb
 from transformers import set_seed
 
-from test import *
-from train import *
+import train
+import test
 
 logger = logging.getLogger(__name__)
 
 
 def main(args):
-    if args.task == "xlcost_code_translation":
-        if args.do_train:
-            logger.info(f"Running fine-tuning of {args.model_name_or_path} for code translation.")
-            train_xlcost_code_translation(args)
-        if args.do_test:
-            logger.info(f"Testing model {args.model_name_or_path} on code translation.")
-            test_xlcost_code_translation(args)
-    elif args.task == "xlcost_code_generation" or args.task == "concode_code_generation":
-        if args.do_train:
-            logger.info(f"Running fine-tuning of {args.model_name_or_path} for code generation ({args.task.split('_')[0]}).")
-            train_code_generation(args)
-        if args.do_test:
-            logger.info(f"Testing model {args.model_name_or_path} on code generation ({args.task.split('_')[0]}).")
-            test_code_generation(args)
-    elif args.task == "devign_defect_detection":
-        if args.do_train:
-            logger.info(f"Running fine-tuning of {args.model_name_or_path} for defect detection.")
-            train_devign_defect_detection(args)
-        if args.do_test:
-            logger.info(f"Testing model {args.model_name_or_path} on defect detection.")
-            test_devign_defect_detection(args)
-    else:
-        raise ValueError("Wrong task argument name.")
+    if args.do_train:
+        logger.info(f"[Fine-tuning] Model: {args.model_name_or_path} | Task: {args.task}.")
+        train_func = getattr(train, f"train_{args.task}")
+        train_func(args)
+
+    if args.do_test:
+        logger.info(f"[Test] Model: {args.model_name_or_path} | Task: {args.task}.")
+        test_func = getattr(test, f"test_{args.task}")
+        test_func(args)
 
 
 if __name__ == "__main__":
@@ -49,26 +34,31 @@ if __name__ == "__main__":
     parser.add_argument("--task", default="devign_defect_detection", type=str,
                         help="Task on which to fine-tune the model.")
     parser.add_argument("--training_method", default="ft", type=str, help="Method used to fine-tuning the model.")
-    parser.add_argument("--train_batch_size", default=16, type=int)
-    parser.add_argument("--val_batch_size", default=16, type=int)
-    parser.add_argument("--learning_rate", default=5e-5, type=float)
-    parser.add_argument("--weight_decay", default=0.0, type=float)
-    parser.add_argument("--max_num_epochs", default=10, type=float)
-    parser.add_argument("--gradient_accumulation_steps", default=1, type=int)
-    parser.add_argument("--fp16", default=False, type=bool)
-    parser.add_argument("--patience", default=2, type=int)
-    parser.add_argument("--evaluation_strategy", default="epoch", type=str, help="epoch or steps")
-    parser.add_argument("--eval_steps", default=500, type=int)
+
+    parser.add_argument("--num_epochs", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--patience", type=int, default=2)
+
+    parser.add_argument("--learning_rate", type=float,  default=5e-5)
+    parser.add_argument("--lr_scheduler_type", type=str, default="linear")
+    parser.add_argument("--num_warmup_steps", type=int, default=100)
+    parser.add_argument("--weight_decay", type=float, default=0)
+    parser.add_argument("--fp16", type=bool, default=False)
 
     parser.add_argument("--defect_max_seq_length", default=400, type=int)
 
     parser.add_argument("--translation_max_input_length", default=256, type=int)
     parser.add_argument("--translation_max_target_length", default=256, type=int)
 
-    parser.add_argument("--codegen_max_input_length", default=256, type=int)
-    parser.add_argument("--codegen_max_target_length", default=256, type=int)
+    parser.add_argument("--concode_max_input_length", default=256, type=int)
+    parser.add_argument("--concode_max_target_length", default=128, type=int)
 
-    parser.add_argument("--do_sample", default=False, type=bool)
+    parser.add_argument("--conala_max_input_length", default=64, type=int)
+    parser.add_argument("--conala_max_target_length", default=64, type=int)
+
+    parser.add_argument("--human_eval_max_new_tokens", default=256, type=int)
+
     parser.add_argument("--temperature", default=0.7, type=float)
     parser.add_argument("--beam_size", default=5, type=int)
 
@@ -76,7 +66,6 @@ if __name__ == "__main__":
     parser.add_argument("--lora_r", default=8, type=int)
     parser.add_argument("--lora_alpha", default=16, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)
-    parser.add_argument("--lora_bias", default="none", type=str)
 
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
@@ -105,6 +94,6 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(project=args.wandb_project_name, name=args.run_name, group=args.model_name, mode="offline")
+        wandb.init(project=args.wandb_project_name, name=f"{args.task}/{args.run_name}", mode="offline")
 
     main(args)

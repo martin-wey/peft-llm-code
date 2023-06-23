@@ -1,5 +1,3 @@
-import os.path
-
 import torch
 from peft import get_peft_model, TaskType, LoraConfig
 from transformers import \
@@ -9,7 +7,6 @@ from transformers import \
     Trainer, \
     Seq2SeqTrainingArguments, \
     Seq2SeqTrainer, \
-    TrainerCallback, \
     EarlyStoppingCallback
 
 from utils import *
@@ -20,17 +17,18 @@ def load_model_and_tokenizer(args):
     if args.training_method == "ft":
         model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-    elif args.training_method == "lora":
+    else:
         model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
                                                                       torch_dtype=torch.float16,
                                                                       trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-        peft_config = LoraConfig(task_type=peft_task_type,
-                                 r=args.lora_r,
-                                 lora_alpha=args.lora_alpha,
-                                 target_modules=LORA_TARGET_MODULES[args.model_name],
-                                 lora_dropout=args.lora_dropout,
-                                 bias=args.lora_bias)
+        if args.training_method == "lora":
+            peft_config = LoraConfig(task_type=peft_task_type,
+                                     r=args.lora_r,
+                                     lora_alpha=args.lora_alpha,
+                                     target_modules=LORA_TARGET_MODULES[args.model_name],
+                                     lora_dropout=args.lora_dropout,
+                                     bias="none")
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
@@ -38,247 +36,44 @@ def load_model_and_tokenizer(args):
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
 
-    if getattr(tokenizer, "cls_token_id") is None:
-        tokenizer.cls_token_id = tokenizer.bos_token_id
-        model.config.cls_token_id = model.config.bos_token_id
+    if "incoder" in args.model_name:
+        tokenizer.eos_token_id = 2
+        tokenizer.pad_token_id = 1
+
+    if args.model_type == "decoder":
+        tokenizer.padding_side = "left"
 
     return model, tokenizer
 
 
-class SaveModelCallback(TrainerCallback):
-    def __init__(self, output_dir, tokenizer):
-        self.output_dir = output_dir
-        self.tokenizer = tokenizer
-
-    def on_save(self, args, state, control, model=None, **kwargs):
-        checkpoint_dir = os.path.join(self.output_dir, f"checkpoint_ep{int(state.epoch)}")
-        if not os.path.exists(checkpoint_dir):
-            os.makedirs(checkpoint_dir)
-        model.save_pretrained(checkpoint_dir)
-        self.tokenizer.save_pretrained(checkpoint_dir)
-
-
-def train_devign_defect_detection(args):
-    dataset = load_devign_defect_detection_dataset(args.dataset_dir)
+def train_conala_code_generation(args):
+    dataset = load_conala_dataset(args)
     del dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
 
-    if args.model_type == "encoder":
-        def preprocess_function(examples):
-            model_inputs = tokenizer(examples["func"],
-                                     truncation=True,
-                                     padding="max_length",
-                                     max_length=args.defect_max_seq_length)
-            model_inputs["labels"] = examples["target"]
-            return model_inputs
-
-        dataset = dataset.map(preprocess_function,
-                              batched=True,
-                              num_proc=args.num_workers,
-                              remove_columns=dataset["train"].column_names,
-                              desc="Generating samples features.")
-    else:
-        def preprocess_function_dec(example):
-            suffix = tokenizer(" Label : ")
-            label = tokenizer(example["text_label"])
-            max_input_len = args.defect_max_seq_length - len(suffix.input_ids) - len(label.input_ids) - 1
-            # perform truncation only on the code to avoid truncating the suffix and label
-            model_inputs = tokenizer(example["func"],
-                                     truncation=True,
-                                     max_length=max_input_len)
-            model_inputs["labels"] = [-100] * (len(model_inputs["input_ids"]) + len(suffix.input_ids)) \
-                                     + label.input_ids + [-100]
-            model_inputs["input_ids"] = model_inputs["input_ids"] + suffix.input_ids + label.input_ids \
-                                        + [tokenizer.eos_token_id]
-            model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"])
-
-            # left-padding
-            padding_len = args.defect_max_seq_length - len(model_inputs["input_ids"])
-            model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"]
-            model_inputs["labels"] = [-100] * padding_len + model_inputs["labels"]
-            model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
-
-            return model_inputs
-
-        def preprocess_function_encdec(examples):
-            model_inputs = tokenizer(examples["func"],
-                                     truncation=True,
-                                     padding="max_length",
-                                     max_length=args.defect_max_seq_length)
-            labels = tokenizer(examples["text_label"],
-                               truncation=True,
-                               padding="max_length",
-                               max_length=target_max_length)
-            labels = labels["input_ids"]
-            labels[labels == tokenizer.pad_token_id] = -100
-            model_inputs["labels"] = labels
-            return model_inputs
-
-        preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
-        # transform the labels into textual labels for generation
-        id2label = {0: "No", 1: "Yes"}
-        target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in id2label.values()])
-        dataset = dataset.map(lambda x: {"text_label": [id2label[label] for label in x["target"]]},
-                              batched=True,
-                              num_proc=args.num_workers)
-        dataset = dataset.map(preprocess_function,
-                              num_proc=args.num_workers,
-                              remove_columns=dataset["train"].column_names,
-                              desc="Generating samples features.")
-
-    training_args_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
-    trainer_cls = Seq2SeqTrainer if args.model_type == "encoder-decoder" else Trainer
-    training_args = training_args_cls(
-        output_dir=args.run_dir,
-        learning_rate=args.learning_rate,
-        per_device_train_batch_size=args.train_batch_size,
-        per_device_eval_batch_size=args.val_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.max_num_epochs,
-        weight_decay=args.weight_decay,
-        fp16=args.fp16,
-        evaluation_strategy=args.evaluation_strategy,
-        eval_steps=args.eval_steps,
-        save_strategy=args.evaluation_strategy,
-        save_steps=args.eval_steps,
-        save_total_limit=5,
-        logging_strategy="steps",
-        logging_steps=50,
-        load_best_model_at_end=True,
-        report_to="wandb" if args.use_wandb else "none"
-    )
-    trainer = trainer_cls(
-        model=model,
-        args=training_args,
-        train_dataset=dataset["train"],
-        eval_dataset=dataset["valid"],
-        tokenizer=tokenizer,
-        data_collator=default_data_collator,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]
-    )
-    trainer.train()
-    # save best model after training
-    trainer.model.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
-    trainer.tokenizer.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
-
-
-def train_xlcost_code_translation(args):
-    dataset = load_xlcost_code_translation_dataset(args.dataset_dir, train_samples_percentage=0.25)
-    del dataset["test"]
-
-    model, tokenizer = load_model_and_tokenizer(args)
     def preprocess_function_dec(example):
-        # we inform the model what are the input and target languages
-        #   by defining a prefix as follow: # {input_lang} -> {target_lang}
-        example_input = f"{example['input_lang']} -> {example['target_lang']} : {example['input']}"
-        model_inputs = tokenizer(example_input,
-                                 truncation=True,
-                                 max_length=args.translation_max_input_length - 1)
-        tokenized_target = tokenizer(example["target"],
+        """
+        # we tokenize, pad and truncate the samples in the following way:
+        #   <pad><pad>...<intent + \n><snippet><eos>
+        #
+        #   - prompt tokens `<pad><pad>...<intent + \n>` are ignored in the computation of the loss (-100 labels)
+        #   - `<eos>` delimits the snippet and allows the model to have more focused predictions at inference
+        """
+        tokenized_target = tokenizer(example["snippet"],
                                      truncation=True,
-                                     max_length=args.translation_max_target_length - 1)
-        model_inputs["input_ids"] = model_inputs["input_ids"] + [tokenizer.eos_token_id]
+                                     max_length=args.conala_max_target_length - 1,
+                                     # incoder adds eos token before the start of a sequence -> ignore
+                                     add_special_tokens=False)
         tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
-
-        padding_len = (args.translation_max_input_length + args.translation_max_target_length) - \
-                      (len(model_inputs["input_ids"]) + len(tokenized_target["input_ids"]))
-
-        model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"] + [1]
-        model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
         tokenized_target["attention_mask"] = tokenized_target["attention_mask"] + [1]
 
-        model_inputs["labels"] = [-100] * len(model_inputs["input_ids"]) + tokenized_target["input_ids"]
-        model_inputs["input_ids"] = model_inputs["input_ids"] + tokenized_target["input_ids"]
-        model_inputs["attention_mask"] = model_inputs["attention_mask"] + tokenized_target["attention_mask"]
-
-        return model_inputs
-
-    def preprocess_function_encdec(example):
-        example_input = f"{example['input_lang']} -> {example['target_lang']} : {example['input']}"
-        model_inputs = tokenizer(example_input,
+        max_prompt_len = (args.conala_max_input_length + args.conala_max_target_length) - \
+                         len(tokenized_target["input_ids"])
+        model_inputs = tokenizer(example["rewritten_intent"] + "\n",
                                  truncation=True,
                                  padding="max_length",
-                                 max_length=args.translation_max_input_length)
-        labels = tokenizer(example["target"],
-                           truncation=True,
-                           padding="max_length",
-                           max_length=args.translation_max_target_length)
-        labels = labels.input_ids
-        labels = [label if label != tokenizer.pad_token_id else -100 for label in labels]
-        model_inputs["labels"] = labels
-        return model_inputs
-
-    preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
-    dataset = dataset.map(preprocess_function,
-                          num_proc=args.num_workers,
-                          remove_columns=dataset["train"].column_names,
-                          desc="Generating samples features.")
-
-    training_args_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
-    trainer_cls = Seq2SeqTrainer if args.model_type == "encoder-decoder" else Trainer
-    training_args = training_args_cls(
-        output_dir=args.run_dir,
-        learning_rate=args.learning_rate,
-        per_device_train_batch_size=args.train_batch_size,
-        per_device_eval_batch_size=args.val_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.max_num_epochs,
-        weight_decay=args.weight_decay,
-        fp16=args.fp16,
-        evaluation_strategy=args.evaluation_strategy,
-        eval_steps=args.eval_steps,
-        save_strategy=args.evaluation_strategy,
-        save_steps=args.eval_steps,
-        save_total_limit=5,
-        logging_strategy="steps",
-        logging_steps=50,
-        load_best_model_at_end=True,
-        report_to="wandb" if args.use_wandb else "none"
-    )
-    trainer = trainer_cls(
-        model=model,
-        args=training_args,
-        train_dataset=dataset["train"],
-        eval_dataset=dataset["val"],
-        tokenizer=tokenizer,
-        data_collator=default_data_collator,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]
-    )
-    trainer.train()
-    # save best model after training
-    trainer.model.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
-    trainer.tokenizer.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
-
-
-def train_code_generation(args):
-    if args.task == "xlcost_code_generation":
-        dataset = load_xlcost_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.50)
-    else:
-        dataset = load_concode_code_generation_dataset(args.dataset_dir, train_samples_percentage=0.25)
-    del dataset["test"]
-
-    model, tokenizer = load_model_and_tokenizer(args)
-    def preprocess_function_dec(example):
-        suffix = tokenizer(f" Code ({example['target_lang']}) : ")
-        max_input_len = args.codegen_max_input_length - len(suffix.input_ids) - 1
-        # perform truncation only on the code to avoid truncating the suffix
-        model_inputs = tokenizer(example["input"],
-                                 truncation=True,
-                                 max_length=max_input_len)
-        tokenized_target = tokenizer(example["target"],
-                                     truncation=True,
-                                     max_length=args.codegen_max_target_length - 1)
-        model_inputs["input_ids"] = model_inputs["input_ids"] + suffix.input_ids + [tokenizer.eos_token_id]
-        tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
-
-        padding_len = (args.codegen_max_input_length + args.codegen_max_target_length) - \
-                      (len(model_inputs["input_ids"]) + len(tokenized_target["input_ids"]))
-
-        model_inputs["input_ids"] = [tokenizer.pad_token_id] * padding_len + model_inputs["input_ids"]
-        model_inputs["attention_mask"] = [0] * padding_len + model_inputs["attention_mask"] \
-                                         + suffix.attention_mask + [1]
-        tokenized_target["attention_mask"] = tokenized_target["attention_mask"] + [1]
+                                 max_length=max_prompt_len)
 
         model_inputs["labels"] = [-100] * len(model_inputs["input_ids"]) + tokenized_target["input_ids"]
         model_inputs["input_ids"] = model_inputs["input_ids"] + tokenized_target["input_ids"]
@@ -287,28 +82,20 @@ def train_code_generation(args):
         return model_inputs
 
     def preprocess_function_encdec(example):
-        suffix = tokenizer(f" Code ({example['target_lang']}) : ", add_special_tokens=False)
-        model_inputs = tokenizer(example["input"],
+        model_inputs = tokenizer(example["rewritten_intent"] + "\n",
                                  truncation=True,
-                                 max_length=args.codegen_max_input_length - len(suffix.input_ids) - 2,
-                                 add_special_tokens=False)
-        model_inputs["input_ids"] = [tokenizer.cls_token_id] + \
-                                    model_inputs["input_ids"] + suffix.input_ids + \
-                                    [tokenizer.eos_token_id]
-
-        padding_len = args.codegen_max_input_length - len(model_inputs["input_ids"])
-        model_inputs["attention_mask"] = [1] * len(model_inputs["input_ids"]) + [0] * padding_len
-        model_inputs["input_ids"] = model_inputs["input_ids"] + [tokenizer.pad_token_id] * padding_len
-
-        labels = tokenizer(example["target"],
-                           truncation=True,
-                           padding="max_length",
-                           max_length=args.codegen_max_target_length,
-                           add_special_tokens=True)
-
-        labels = labels.input_ids
+                                 padding="max_length",
+                                 max_length=args.conala_max_input_length,
+                                 add_special_tokens=True)
+        tokenized_target = tokenizer(example["snippet"],
+                                     truncation=True,
+                                     padding="max_length",
+                                     max_length=args.conala_max_target_length,
+                                     add_special_tokens=True)
+        labels = tokenized_target["input_ids"]
         labels = [label if label != tokenizer.pad_token_id else -100 for label in labels]
         model_inputs["labels"] = labels
+
         return model_inputs
 
     preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
@@ -321,19 +108,20 @@ def train_code_generation(args):
     trainer_cls = Seq2SeqTrainer if args.model_type == "encoder-decoder" else Trainer
     training_args = training_args_cls(
         output_dir=args.run_dir,
-        learning_rate=args.learning_rate,
-        per_device_train_batch_size=args.train_batch_size,
-        per_device_eval_batch_size=args.val_batch_size,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        num_train_epochs=args.num_epochs,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.max_num_epochs,
+        warmup_steps=args.num_warmup_steps,
+        learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        evaluation_strategy=args.evaluation_strategy,
-        eval_steps=args.eval_steps,
-        save_strategy=args.evaluation_strategy,
-        save_steps=args.eval_steps,
-        save_total_limit=5,
+        fp16=args.fp16,
+        lr_scheduler_type=args.lr_scheduler_type,
         logging_strategy="steps",
-        logging_steps=50,
+        logging_steps=20,
+        save_total_limit=2,
         load_best_model_at_end=True,
         report_to="wandb" if args.use_wandb else "none"
     )
