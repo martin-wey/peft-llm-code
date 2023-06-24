@@ -131,15 +131,9 @@ def load_devign_defect_detection_dataset(base_dir):
     return DatasetDict(datasets)
 
 
-def load_conala_dataset(args):
-    datasets = load_dataset("neulab/conala")
-    datasets = datasets.filter(lambda x: x["intent"] is not None)
-    datasets = datasets.filter(lambda x: x["rewritten_intent"] is not None)
+def load_conala_dataset():
+    datasets = load_dataset("neulab/docprompting-conala")
+    datasets = datasets.filter(lambda x: x["nl"] is not None)
+    datasets = datasets.filter(lambda x: x["cmd"] is not None)
 
-    train_val_datasets = datasets["train"].train_test_split(test_size=int(.1 * len(datasets["train"])),
-                                                            shuffle=True, seed=args.seed)
-    return DatasetDict({
-        "train": train_val_datasets["train"],
-        "val": train_val_datasets["test"],
-        "test": datasets["test"]
-    })
+    return datasets

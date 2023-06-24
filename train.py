@@ -47,7 +47,7 @@ def load_model_and_tokenizer(args):
 
 
 def train_conala_code_generation(args):
-    dataset = load_conala_dataset(args)
+    dataset = load_conala_dataset()
     del dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
@@ -55,12 +55,12 @@ def train_conala_code_generation(args):
     def preprocess_function_dec(example):
         """
         # we tokenize, pad and truncate the samples in the following way:
-        #   <pad><pad>...<intent + \n><snippet><eos>
+        #   <pad><pad>...### Instruction:\n<intent>\n### Answer:\n<snippet><eos>
         #
         #   - prompt tokens `<pad><pad>...<intent + \n>` are ignored in the computation of the loss (-100 labels)
         #   - `<eos>` delimits the snippet and allows the model to have more focused predictions at inference
         """
-        tokenized_target = tokenizer(example["snippet"],
+        tokenized_target = tokenizer(example["cmd"],
                                      truncation=True,
                                      max_length=args.conala_max_target_length - 1,
                                      # incoder adds eos token before the start of a sequence -> ignore
@@ -68,9 +68,10 @@ def train_conala_code_generation(args):
         tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
         tokenized_target["attention_mask"] = tokenized_target["attention_mask"] + [1]
 
+        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
         max_prompt_len = (args.conala_max_input_length + args.conala_max_target_length) - \
                          len(tokenized_target["input_ids"])
-        model_inputs = tokenizer(example["rewritten_intent"] + "\n",
+        model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
                                  max_length=max_prompt_len)
@@ -82,12 +83,13 @@ def train_conala_code_generation(args):
         return model_inputs
 
     def preprocess_function_encdec(example):
-        model_inputs = tokenizer(example["rewritten_intent"] + "\n",
+        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
                                  max_length=args.conala_max_input_length,
                                  add_special_tokens=True)
-        tokenized_target = tokenizer(example["snippet"],
+        tokenized_target = tokenizer(example["cmd"],
                                      truncation=True,
                                      padding="max_length",
                                      max_length=args.conala_max_target_length,
@@ -129,7 +131,7 @@ def train_conala_code_generation(args):
         model=model,
         args=training_args,
         train_dataset=dataset["train"],
-        eval_dataset=dataset["val"],
+        eval_dataset=dataset["validation"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]

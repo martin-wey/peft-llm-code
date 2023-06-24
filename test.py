@@ -18,7 +18,7 @@ from utils import *
 
 logger = logging.getLogger(__name__)
 
-EOF_STRINGS = ["<|endoftext|>", "</s>"]
+EOF_STRINGS = ["<|endoftext|>", "</s>", "\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
 HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
 
 
@@ -68,17 +68,18 @@ class EndOfFunctionCriteria(StoppingCriteria):
 
 
 def test_conala_code_generation(args):
-    dataset = load_conala_dataset(args)
+    dataset = load_conala_dataset()
     test_dataset = dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
 
     def preprocess_function_dec(example):
-        model_inputs = tokenizer(example["rewritten_intent"] + "\n",
+        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
                                  max_length=args.conala_max_input_length)
-        labels = tokenizer(example["snippet"],
+        labels = tokenizer(example["cmd"],
                            truncation=True,
                            padding="max_length",
                            max_length=args.conala_max_target_length)["input_ids"]
@@ -87,12 +88,13 @@ def test_conala_code_generation(args):
         return model_inputs
 
     def preprocess_function_encdec(example):
-        model_inputs = tokenizer(example["rewritten_intent"] + "\n",
+        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
                                  max_length=args.conala_max_input_length,
                                  add_special_tokens=True)
-        labels = tokenizer(example["snippet"],
+        labels = tokenizer(example["cmd"],
                            truncation=True,
                            padding="max_length",
                            max_length=args.conala_max_target_length,
@@ -133,6 +135,13 @@ def test_conala_code_generation(args):
             else:
                 batch_generated_tokens = tokenizer.batch_decode(batch_generation, skip_special_tokens=True)
             batch_references = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
+
+            print("*" * 100)
+            print(batch_generated_tokens[0])
+            print("-" * 100)
+            print(batch_references[0])
+            print("*" * 100)
+
             if "incoder" in args.model_name:
                 # somehow the pad tokens do not get filtered when decoding with InCoder
                 batch_references = [ref.replace("<pad>", "") for ref in batch_references]
@@ -167,7 +176,7 @@ def test_human_eval(args):
                             pin_memory=True)
 
     gen_token_dict = defaultdict(list)
-    for step, sample in tqdm(enumerate(dataloader), total=len(human_eval)):
+    for step, sample in tqdm(enumerate(dataloader), total=len(test_dataset)):
         with torch.no_grad():
             generated_sequences = model.generate(
                 input_ids=sample["input_ids"].to(args.device),

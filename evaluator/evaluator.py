@@ -7,8 +7,8 @@ from bleu import _bleu
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Evaluate leaderboard predictions for BigCloneBench dataset.')
-    parser.add_argument('--references', '-ref', help="filename of the labels, in txt format.")
-    parser.add_argument('--predictions', '-pre', help="filename of the leaderboard predictions, in txt format.")
+    parser.add_argument('--refs', '-ref', help="filename of the labels, in txt format.")
+    parser.add_argument('--preds', '-pre', help="filename of the leaderboard predictions, in txt format.")
 
     args = parser.parse_args()
 
