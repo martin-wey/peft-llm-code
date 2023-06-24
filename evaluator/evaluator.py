@@ -12,8 +12,8 @@ def main():
 
     args = parser.parse_args()
 
-    refs = [x.strip() for x in open(args.references, 'r', encoding='utf-8').readlines()]
-    pres = [x.strip() for x in open(args.predictions, 'r', encoding='utf-8').readlines()]
+    refs = [x.strip() for x in open(args.refs, 'r', encoding='utf-8').readlines()]
+    pres = [x.strip() for x in open(args.preds, 'r', encoding='utf-8').readlines()]
 
     assert len(refs) == len(pres)
 
@@ -26,7 +26,7 @@ def main():
             count += 1
     acc = round(count / length * 100, 2)
 
-    bleu_score = round(_bleu(args.references, args.predictions), 2)
+    bleu_score = round(_bleu(args.refs, args.preds), 2)
 
     print('BLEU:', bleu_score, '; Acc:', acc)
 

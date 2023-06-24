@@ -18,7 +18,7 @@ from utils import *
 
 logger = logging.getLogger(__name__)
 
-EOF_STRINGS = ["<|endoftext|>", "</s>", "\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
+EOF_STRINGS = ["<|endoftext|>", "</s>", "\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif", "\n"]
 HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
 
 
@@ -73,8 +73,17 @@ def test_conala_code_generation(args):
 
     model, tokenizer = load_model_and_tokenizer(args)
 
+    if args.num_few_shot_examples > 0:
+        examples = read_conala_few_shot_examples(args)
+        few_shot_prompt = "Answer the following instruction in one line of Python code:"
+        for n in range(1, args.num_few_shot_examples + 1):
+            few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
+                                 \n### Answer:\n{examples[f'solution{n}']}\n"
+
     def preprocess_function_dec(example):
         prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        if args.num_few_shot_examples > 0:
+            prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
@@ -109,6 +118,9 @@ def test_conala_code_generation(args):
                                     remove_columns=[cname for cname in test_dataset.column_names if
                                                     cname not in ["input_ids", "attention_mask", "labels"]],
                                     desc="Generating samples features.")
+
+    print(tokenizer.decode(test_dataset[0]["input_ids"], skip_special_tokens=True))
+
     dataloader = DataLoader(test_dataset,
                             batch_size=args.batch_size,
                             collate_fn=default_data_collator,
@@ -149,8 +161,13 @@ def test_conala_code_generation(args):
             references += [tokens for tokens in batch_references]
 
     logger.info(f"Exporting test predictions in directory {args.output_dir}.")
-    with open(os.path.join(f"{args.output_dir}/predictions.txt"), "w", encoding="utf-8") as fpred, \
-            open(os.path.join(f"{args.output_dir}/references.txt"), "w", encoding="utf-8") as fref:
+    pred_fname = "predictions.txt"
+    ref_fname = "references.txt"
+    if args.num_few_shot_examples > 0:
+        pred_fname = f"predictions_{args.num_few_shot_examples}shot.txt"
+        ref_fname = f"references_{args.num_few_shot_examples}shot.txt"
+    with open(os.path.join(args.output_dir, pred_fname), "w", encoding="utf-8") as fpred, \
+            open(os.path.join(args.output_dir, ref_fname), "w", encoding="utf-8") as fref:
         for prediction, reference, dataset in zip(predictions, references, test_dataset):
             fpred.write(prediction.replace("\n", " ") + "\n")
             fref.write(reference.replace("\n", " ") + "\n")

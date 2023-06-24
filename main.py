@@ -30,6 +30,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_type", default="encoder", type=str, help="Model architecture type.")
     parser.add_argument("--dataset_dir", default="./datasets", type=str, help="Dataset base directory.")
     parser.add_argument("--output_dir", default="./runs", type=str, help="Output directory.")
+    parser.add_argument("--run_name", default=None, type=str)
 
     parser.add_argument("--task", default="conala_code_generation", type=str,
                         help="Task on which to fine-tune the model.")
@@ -52,13 +53,15 @@ if __name__ == "__main__":
     parser.add_argument("--human_eval_max_new_tokens", default=256, type=int)
     parser.add_argument("--human_eval_num_sequences", default=10, type=int)
 
-    parser.add_argument("--temperature", default=0.7, type=float)
-    parser.add_argument("--beam_size", default=5, type=int)
+    parser.add_argument("--temperature", default=0.8, type=float)
+    parser.add_argument("--beam_size", default=4, type=int)
 
     parser.add_argument("--lora_adapter_path", default=None, type=str)
-    parser.add_argument("--lora_r", default=8, type=int)
-    parser.add_argument("--lora_alpha", default=16, type=int)
+    parser.add_argument("--lora_r", default=32, type=int)
+    parser.add_argument("--lora_alpha", default=64, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)
+
+    parser.add_argument("--num_few_shot_examples", default=0, type=int)
 
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
@@ -66,6 +69,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_project_name", default="peft-code", type=str)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--device", default="cuda", type=str)
+    parser.add_argument("--gpu_id", default=0, type=int)
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
@@ -74,11 +78,10 @@ if __name__ == "__main__":
     # Setup logging and output directories
     args.model_name = args.model_name_or_path.split('/')[-1]
     if args.do_train:
-        args.run_name = f"{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
+        if args.run_name is None:
+            args.run_name = f"{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
         args.run_dir = Path(f"{args.output_dir}/{args.task}/{args.run_name}")
         args.run_dir.mkdir(exist_ok=True)
-    else:
-        args.run_dir = args.model_name_or_path
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -87,6 +90,6 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(project=args.wandb_project_name, name=f"{args.task}/{args.run_name}", mode="offline")
+        wandb.init(project=args.wandb_project_name, name=f"{args.task}/{args.run_name}", config=vars(args))
 
     main(args)

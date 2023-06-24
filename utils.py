@@ -1,3 +1,4 @@
+import json
 import os
 
 from transformers import \
@@ -137,3 +138,9 @@ def load_conala_dataset():
     datasets = datasets.filter(lambda x: x["cmd"] is not None)
 
     return datasets
+
+
+def read_conala_few_shot_examples(args):
+    with open("conala_few_shot_examples.json") as f:
+        examples = json.load(f)
+    return examples
