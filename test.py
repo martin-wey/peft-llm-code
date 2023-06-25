@@ -18,7 +18,7 @@ from utils import *
 
 logger = logging.getLogger(__name__)
 
-EOF_STRINGS = ["<|endoftext|>", "</s>", "\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif", "\n"]
+EOF_STRINGS = ["<|endoftext|>", "</s>", "\n"]
 HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
 
 
@@ -73,15 +73,18 @@ def test_conala_code_generation(args):
 
     model, tokenizer = load_model_and_tokenizer(args)
 
-    if args.num_few_shot_examples > 0:
-        examples = read_conala_few_shot_examples(args)
-        few_shot_prompt = "Answer the following instruction in one line of Python code:"
-        for n in range(1, args.num_few_shot_examples + 1):
-            few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
-                                 \n### Answer:\n{examples[f'solution{n}']}\n"
+    if args.num_few_shot_examples > -1:
+        # zero-shot learning
+        few_shot_prompt = "Generate one line of Python code given an instruction."
+        if args.num_few_shot_examples > 0:
+            # few-shot learning
+            examples = read_conala_few_shot_examples(args)
+            for n in range(1, args.num_few_shot_examples + 1):
+                few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
+                                     \n### Answer:\n{examples[f'solution{n}']}\n"
 
     def preprocess_function_dec(example):
-        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        prompt = "\n### Instruction:\n" + example["nl"] + "\n### Answer:\n"
         if args.num_few_shot_examples > 0:
             prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt,
@@ -97,7 +100,7 @@ def test_conala_code_generation(args):
         return model_inputs
 
     def preprocess_function_encdec(example):
-        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        prompt = "\n### Instruction:\n" + example["nl"] + "\n### Answer:\n"
         model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
@@ -118,9 +121,6 @@ def test_conala_code_generation(args):
                                     remove_columns=[cname for cname in test_dataset.column_names if
                                                     cname not in ["input_ids", "attention_mask", "labels"]],
                                     desc="Generating samples features.")
-
-    print(tokenizer.decode(test_dataset[0]["input_ids"], skip_special_tokens=True))
-
     dataloader = DataLoader(test_dataset,
                             batch_size=args.batch_size,
                             collate_fn=default_data_collator,
@@ -148,22 +148,20 @@ def test_conala_code_generation(args):
                 batch_generated_tokens = tokenizer.batch_decode(batch_generation, skip_special_tokens=True)
             batch_references = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
 
-            print("*" * 100)
-            print(batch_generated_tokens[0])
-            print("-" * 100)
-            print(batch_references[0])
-            print("*" * 100)
-
             if "incoder" in args.model_name:
                 # somehow the pad tokens do not get filtered when decoding with InCoder
                 batch_references = [ref.replace("<pad>", "") for ref in batch_references]
-            predictions += [generated_tokens for generated_tokens in batch_generated_tokens]
+
+            for generation in batch_generated_tokens:
+                gen_code = re.split("(%s)" % "|".join(EOF_STRINGS), generation)[0]
+                predictions.append(gen_code)
+
             references += [tokens for tokens in batch_references]
 
     logger.info(f"Exporting test predictions in directory {args.output_dir}.")
     pred_fname = "predictions.txt"
     ref_fname = "references.txt"
-    if args.num_few_shot_examples > 0:
+    if args.num_few_shot_examples > -1:
         pred_fname = f"predictions_{args.num_few_shot_examples}shot.txt"
         ref_fname = f"references_{args.num_few_shot_examples}shot.txt"
     with open(os.path.join(args.output_dir, pred_fname), "w", encoding="utf-8") as fpred, \

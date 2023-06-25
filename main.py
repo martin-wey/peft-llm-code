@@ -61,7 +61,7 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", default=64, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)
 
-    parser.add_argument("--num_few_shot_examples", default=0, type=int)
+    parser.add_argument("--num_few_shot_examples", default=-1, type=int)
 
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
@@ -90,6 +90,6 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(project=args.wandb_project_name, name=f"{args.task}/{args.run_name}", config=vars(args))
+        wandb.init(project=args.wandb_project_name, name=f"{args.task}/{args.run_name}", config=vars(args), mode="offline")
 
     main(args)
