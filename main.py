@@ -25,7 +25,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", default="microsoft/codebert-base", type=str,
+    parser.add_argument("--model_name_or_path", default="NinedayWang/PolyCoder-160M", type=str,
                         help="Name of the pretrained model on Huggingface Hub or in local storage.")
     parser.add_argument("--model_type", default="encoder", type=str, help="Model architecture type.")
     parser.add_argument("--dataset_dir", default="./datasets", type=str, help="Dataset base directory.")

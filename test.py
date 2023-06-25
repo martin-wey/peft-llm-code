@@ -1,13 +1,14 @@
-import json
 import logging
+import logging
+import os
 import re
 from collections import defaultdict
 
 import evaluate
 import torch
-
 from peft import PeftModel
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from transformers import \
     AutoTokenizer, \
     default_data_collator, \
@@ -78,14 +79,14 @@ def test_conala_code_generation(args):
         few_shot_prompt = "Generate one line of Python code given an instruction."
         if args.num_few_shot_examples > 0:
             # few-shot learning
-            examples = read_conala_few_shot_examples(args)
+            examples = read_conala_few_shot_examples()
             for n in range(1, args.num_few_shot_examples + 1):
                 few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
                                      \n### Answer:\n{examples[f'solution{n}']}\n"
 
     def preprocess_function_dec(example):
         prompt = "\n### Instruction:\n" + example["nl"] + "\n### Answer:\n"
-        if args.num_few_shot_examples > 0:
+        if args.num_few_shot_examples >= 0:
             prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt,
                                  truncation=True,
@@ -101,6 +102,8 @@ def test_conala_code_generation(args):
 
     def preprocess_function_encdec(example):
         prompt = "\n### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        if args.num_few_shot_examples >= 0:
+            prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
@@ -233,3 +236,8 @@ def test_human_eval(args):
 
     with open(f"{args.output_dir}/human_eval.json", "w") as fp:
         json.dump(pass_at_k, fp)
+
+
+def test_conala_pass_at_k(args):
+    load_conala_unit_tests_dataset()
+
