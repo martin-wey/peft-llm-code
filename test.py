@@ -24,17 +24,18 @@ HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif"]
 
 
 def load_model_and_tokenizer(args):
+    kwargs = {"trust_remote_code": True}
     if args.training_method == "ft":
-        kwargs = {}
         if args.fp16:
             kwargs["torch_dtype"] = torch.float16
         model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, **kwargs).to(args.device)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     else:
         inference_model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
-                                                                                torch_dtype=torch.float16)
+                                                                                torch_dtype=torch.float16,
+                                                                                **kwargs)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-        model = PeftModel.from_pretrained(inference_model, args.lora_adapter_path).to(args.device)
+        model = PeftModel.from_pretrained(inference_model, args.adapter_path).to(args.device)
         model.print_trainable_parameters()
 
     if getattr(tokenizer, "pad_token_id") is None:
@@ -181,12 +182,12 @@ def test_human_eval(args):
     code_eval_metric = evaluate.load("code_eval")
 
     model, tokenizer = load_model_and_tokenizer(args)
-    if args.model_type == "decoder":
-        tokenizer.padding_side = "left"
 
     test_dataset = human_eval.map(lambda e: tokenizer(e["prompt"].strip()),
                                   num_proc=args.num_workers,
                                   desc="Generating samples features.")["test"]
+
+    # @todo: format prompt: ### Instruction ... ### Answer:
 
     dataloader = DataLoader(test_dataset,
                             batch_size=1,
@@ -239,5 +240,80 @@ def test_human_eval(args):
 
 
 def test_conala_pass_at_k(args):
-    load_conala_unit_tests_dataset()
+    os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
+    dataset = load_conala_unit_tests_dataset()
+    code_eval_metric = evaluate.load("code_eval")
+
+    model, tokenizer = load_model_and_tokenizer(args)
+
+    def preprocess_function_dec(example):
+        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
+        model_inputs = tokenizer(prompt,
+                                 truncation=True,
+                                 padding="max_length",
+                                 max_length=args.conala_max_input_length)
+        return model_inputs
+
+    def preprocess_function_encdec(example):
+        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
+        model_inputs = tokenizer(prompt,
+                                 truncation=True,
+                                 padding="max_length",
+                                 max_length=args.conala_max_input_length,
+                                 add_special_tokens=True)
+        return model_inputs
+
+    preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
+    test_dataset = dataset.map(preprocess_function,
+                               num_proc=args.num_workers,
+                               remove_columns=dataset.column_names,
+                               desc="Generating samples features.")
+    dataloader = DataLoader(test_dataset,
+                            batch_size=1,
+                            collate_fn=default_data_collator,
+                            pin_memory=True)
+
+    gen_token_dict = defaultdict(list)
+    for step, sample in tqdm(enumerate(dataloader), total=len(test_dataset)):
+        with torch.no_grad():
+            generated_sequences = model.generate(
+                input_ids=sample["input_ids"].to(args.device),
+                do_sample=True,
+                temperature=args.temperature,
+                max_new_tokens=args.conala_max_target_length,
+                num_return_sequences=args.conala_num_sequences,
+                stopping_criteria=StoppingCriteriaList(
+                    [EndOfFunctionCriteria(sample["input_ids"].shape[1], EOF_STRINGS, tokenizer)]
+                )
+            )
+            generated_sequences = generated_sequences.cpu().numpy()
+            new_tokens = generated_sequences[:, sample["input_ids"].shape[1]:]
+
+            for task, new_tokens in zip([step] * args.conala_num_sequences, new_tokens):
+                gen_token_dict[task].append(new_tokens)
+
+    code_gens = [[] for _ in range(len(test_dataset))]
+    for (task, generations), sample in zip(gen_token_dict.items(), dataset):
+        for gen_tokens in generations:
+            gen_code = tokenizer.decode(gen_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+            gen_code = re.split("(%s)" % "|".join(EOF_STRINGS), gen_code)[0]
+            solution = f"{sample['prompt']}{gen_code}{sample['suffix']}".replace('\t', ' ' * 4)
+            code_gens[task].append(solution)
+
+    references = []
+    for task in tqdm(range(len(test_dataset))):
+        test_case = dataset[task]["test"]
+        entry_point = dataset[task]["entry_point"]
+        check_function = '\n'.join([
+            dataset[task]['test_start'],
+            ''.join(test_case),
+            '',
+            f"check({entry_point})",
+        ])
+        references.append(check_function)
+
+    pass_at_k, _ = code_eval_metric.compute(
+        references=references, predictions=code_gens, num_workers=args.num_workers, k=[1, 10, 100]
+    )
+    print(f"Results: {pass_at_k}")

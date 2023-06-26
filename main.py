@@ -27,8 +27,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", default="NinedayWang/PolyCoder-160M", type=str,
                         help="Name of the pretrained model on Huggingface Hub or in local storage.")
-    parser.add_argument("--model_type", default="encoder", type=str, help="Model architecture type.")
-    parser.add_argument("--dataset_dir", default="./datasets", type=str, help="Dataset base directory.")
+    parser.add_argument("--model_type", default="decoder", type=str, help="Model architecture type.")
     parser.add_argument("--output_dir", default="./runs", type=str, help="Output directory.")
     parser.add_argument("--run_name", default=None, type=str)
 
@@ -49,6 +48,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--conala_max_input_length", default=64, type=int)
     parser.add_argument("--conala_max_target_length", default=64, type=int)
+    parser.add_argument("--conala_num_sequences", default=10, type=int)
 
     parser.add_argument("--human_eval_max_new_tokens", default=256, type=int)
     parser.add_argument("--human_eval_num_sequences", default=10, type=int)
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", default=0.8, type=float)
     parser.add_argument("--beam_size", default=4, type=int)
 
-    parser.add_argument("--lora_adapter_path", default=None, type=str)
+    parser.add_argument("--adapter_path", default=None, type=str)
     parser.add_argument("--lora_r", default=32, type=int)
     parser.add_argument("--lora_alpha", default=64, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)

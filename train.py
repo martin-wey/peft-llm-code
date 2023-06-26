@@ -1,5 +1,5 @@
 import torch
-from peft import get_peft_model, TaskType, LoraConfig
+from peft import get_peft_model, TaskType, LoraConfig, PrefixTuningConfig
 from transformers import \
     AutoTokenizer, \
     default_data_collator, \
@@ -29,6 +29,9 @@ def load_model_and_tokenizer(args):
                                      target_modules=LORA_TARGET_MODULES[args.model_name],
                                      lora_dropout=args.lora_dropout,
                                      bias="none")
+        elif args.training_method == "prefix":
+            peft_config = PrefixTuningConfig(task_type=peft_task_type,
+                                             num_virtual_tokens=20)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
