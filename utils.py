@@ -10,8 +10,6 @@ LORA_TARGET_MODULES = {
     "PolyCoder-2.7B": ["query_key_value", "xxx"],
     "codegen-2B-mono": ["q_proj", "v_proj"],
     "codegen-6B-mono": ["q_proj", "v_proj"],
-    "codegen-16B-mono": ["q_proj", "v_proj"],
-    "codegen-6B-multi": ["q_proj", "v_proj"],
     "codet5p-2b": ["q_proj", "v_proj"],
     "codet5p-6b": ["q_proj", "v_proj"],
     "incoder-1B": ["q_proj", "v_proj"],
