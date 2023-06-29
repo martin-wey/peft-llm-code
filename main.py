@@ -48,13 +48,13 @@ if __name__ == "__main__":
 
     parser.add_argument("--conala_max_input_length", default=64, type=int)
     parser.add_argument("--conala_max_target_length", default=64, type=int)
-    parser.add_argument("--conala_num_sequences", default=10, type=int)
 
     parser.add_argument("--human_eval_max_new_tokens", default=256, type=int)
-    parser.add_argument("--human_eval_num_sequences", default=10, type=int)
 
     parser.add_argument("--temperature", default=0.8, type=float)
-    parser.add_argument("--beam_size", default=4, type=int)
+    parser.add_argument("--num_beams", default=4, type=int)
+    parser.add_argument("--top_p", type=float, default=0.95)
+    parser.add_argument("--num_return_sequences", type=int, default=10)
 
     parser.add_argument("--adapter_path", default=None, type=str)
     parser.add_argument("--lora_r", default=32, type=int)

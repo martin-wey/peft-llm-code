@@ -36,6 +36,7 @@ for ((i = 0; i < ${#hps[@]}; i += 2)); do
     --num_few_shot_examples $n_shots \
     --conala_max_input_length $max_len \
     --batch_size $batch_size \
+    --num_beams 4 \
     --do_test \
     --fp16 $fp16
 done

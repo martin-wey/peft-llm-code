@@ -11,10 +11,7 @@ declare -a hps=(
 
 model=$1
 model_type=$2
-batch_size=$3
-gradient_accumulation_steps=$4
-gpu_id=$5
-fp16=$6
+gpu_id=$3
 
 model_name=$(echo "$model" | cut -d '/' -f 2)
 
@@ -23,18 +20,19 @@ for ((i = 0; i < ${#hps[@]}; i += 2)); do
   lora_alpha=${hps[i + 1]}
 
   run_name="${model_name}_lora_r${lora_r}a${lora_alpha}"
+  path="runs/odex_pass_at_k/${run_name}"
+
+  if [[ ! -d "$path" ]]; then
+    mkdir -p "$path"
+  fi
 
   CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
+    --task "odex_pass_at_k" \
     --model_name_or_path $model \
+    --model_type $model_type \
     --training_method "lora" \
-    --learning_rate 3e-4 \
-    --run_name $run_name \
-    --lora_r $lora_r \
-    --lora_alpha $lora_alpha \
-    --batch_size $batch_size \
-    --gradient_accumulation_steps $gradient_accumulation_steps \
-    --gpu_id $gpu_id \
-    --fp16 $fp16 \
-    --do_train \
-    --use_wandb
+    --adapter_path "runs/conala_code_generation/${run_name}/best_model_checkpoint" \
+    --output_dir "runs/odex_pass_at_k/${run_name}" \
+    --num_beams 10 \
+    --do_test
 done

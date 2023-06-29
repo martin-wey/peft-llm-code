@@ -23,10 +23,13 @@ for ((i = 0; i < ${#hps[@]}; i += 2)); do
   run_name="${model_name}_lora_r${lora_r}a${lora_alpha}"
 
   CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
+    --task "conala_code_generation" \
     --model_name_or_path $model \
+    --model_type $model_type \
     --training_method "lora" \
     --adapter_path "runs/conala_code_generation/${run_name}/best_model_checkpoint" \
     --output_dir "runs/conala_code_generation/${run_name}/best_model_checkpoint" \
     --batch_size $batch_size \
+    --num_beams 4 \
     --do_test
 done

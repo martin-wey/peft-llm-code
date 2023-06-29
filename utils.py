@@ -45,7 +45,7 @@ def read_conala_few_shot_examples():
     return examples
 
 
-def load_conala_unit_tests_dataset():
+def load_odex_dataset():
     dataset = load_dataset("neulab/odex")["test"]
     conala = load_dataset("neulab/docprompting-conala")["test"]
 
