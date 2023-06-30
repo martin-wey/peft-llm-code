@@ -45,11 +45,11 @@ def read_conala_few_shot_examples():
     return examples
 
 
-def load_odex_dataset():
+def load_test_dataset():
     dataset = load_dataset("neulab/odex")["test"]
-    conala = load_dataset("neulab/docprompting-conala")["test"]
+    conala = load_dataset("neulab/docprompting-conala")["train"]
 
-    # only select samples that appear in CoNaLa dataset
-    dataset = dataset.filter(lambda example: example["intent"] in conala["nl"])
+    # make sure we remove test samples that appear in the fine-tuning dataset to avoid data leakage
+    dataset = dataset.filter(lambda example: example["intent"] not in conala["nl"])
 
     return dataset

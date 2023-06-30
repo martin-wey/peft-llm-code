@@ -8,20 +8,20 @@ gpu_id=$3
 fp16=$4
 
 model_name=$(echo "$model" | cut -d '/' -f 2)
-path="runs/odex_pass_at_k_few_shot/${model_name}"
+output_dir="runs/test_pass_at_k/${model_name}"
 
-if [[ ! -d "$path" ]]; then
-  mkdir -p "$path"
+if [[ ! -d "$output_dir" ]]; then
+  mkdir -p "$output_dir"
 fi
 
 for n_shot in "${n_shots[@]}"; do
   echo "${model} - ${n_shot}-shot"
 
   CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
-    --task "odex_pass_at_k" \
+    --task "pass_at_k" \
     --model_name_or_path $model \
     --model_type $model_type \
-    --output_dir $path \
+    --output_dir $output_dir \
     --num_few_shot_examples $n_shot \
     --num_beams 10 \
     --do_test \

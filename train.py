@@ -24,14 +24,16 @@ def load_model_and_tokenizer(args):
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         if args.training_method == "lora":
             peft_config = LoraConfig(task_type=peft_task_type,
+                                     inference_mode=False,
                                      r=args.lora_r,
                                      lora_alpha=args.lora_alpha,
                                      target_modules=LORA_TARGET_MODULES[args.model_name],
                                      lora_dropout=args.lora_dropout,
                                      bias="none")
-        elif args.training_method == "prefix":
+        elif args.training_method == "prefix-tuning":
             peft_config = PrefixTuningConfig(task_type=peft_task_type,
-                                             num_virtual_tokens=20)
+                                             inference_mode=False,
+                                             num_virtual_tokens=args.num_virtual_tokens)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
@@ -49,7 +51,7 @@ def load_model_and_tokenizer(args):
     return model, tokenizer
 
 
-def train_conala_code_generation(args):
+def train_code_generation(args):
     dataset = load_conala_dataset()
     del dataset["test"]
 

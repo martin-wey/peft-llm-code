@@ -31,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", default="./runs", type=str, help="Output directory.")
     parser.add_argument("--run_name", default=None, type=str)
 
-    parser.add_argument("--task", default="conala_code_generation", type=str,
+    parser.add_argument("--task", default="code_generation", type=str,
                         help="Task on which to fine-tune the model.")
     parser.add_argument("--training_method", default="ft", type=str, help="Method used to fine-tuning the model.")
 
@@ -57,9 +57,12 @@ if __name__ == "__main__":
     parser.add_argument("--num_return_sequences", type=int, default=10)
 
     parser.add_argument("--adapter_path", default=None, type=str)
+
     parser.add_argument("--lora_r", default=32, type=int)
     parser.add_argument("--lora_alpha", default=64, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)
+
+    parser.add_argument("--num_virtual_tokens", default=20, type=int)
 
     parser.add_argument("--num_few_shot_examples", default=-1, type=int)
 
@@ -80,7 +83,7 @@ if __name__ == "__main__":
     if args.do_train:
         if args.run_name is None:
             args.run_name = f"{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
-        args.run_dir = Path(f"{args.output_dir}/{args.task}/{args.run_name}")
+        args.run_dir = Path(f"{args.output_dir}/checkpoints/{args.run_name}")
         args.run_dir.mkdir(exist_ok=True)
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",

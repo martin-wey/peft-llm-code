@@ -17,10 +17,10 @@ gpu_id=$4
 fp16=$5
 
 model_name=$(echo "$model" | cut -d '/' -f 2)
-path="runs/conala_few_shot/${model_name}"
+output_dir="runs/test_code_generation/${model_name}"
 
-if [[ ! -d "$path" ]]; then
-  mkdir -p "$path"
+if [[ ! -d "$output_dir" ]]; then
+  mkdir -p "$output_dir"
 fi
 
 for ((i = 0; i < ${#hps[@]}; i += 2)); do
@@ -29,10 +29,10 @@ for ((i = 0; i < ${#hps[@]}; i += 2)); do
   echo "${model} - ${n_shots}-shot - ${max_len}"
 
   CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
-    --task "conala_code_generation" \
+    --task "code_generation" \
     --model_name_or_path $model \
     --model_type $model_type \
-    --output_dir $path \
+    --output_dir $output_dir \
     --num_few_shot_examples $n_shots \
     --conala_max_input_length $max_len \
     --batch_size $batch_size \

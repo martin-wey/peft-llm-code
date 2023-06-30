@@ -3,6 +3,6 @@
 model=$1
 
 python calc_code_bleu.py \
-  --refs "../../runs/conala_code_generation/${model}/best_model_checkpoint/references.txt" \
-  --hyp "../../runs/conala_code_generation/${model}/best_model_checkpoint/predictions.txt" \
+  --refs "../../runs/test_code_generation/${model}/references.txt" \
+  --hyp "../../runs/test_code_generation/${model}/predictions.txt" \
   --lang "python"

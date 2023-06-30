@@ -3,5 +3,5 @@
 model=$1
 
 python evaluator.py \
-  --refs "../runs/conala_code_generation/${model}/best_model_checkpoint/references.txt" \
-  --preds "../runs/conala_code_generation/${model}/best_model_checkpoint/predictions.txt"
+  --refs "../runs/test_code_generation/${model}/references.txt" \
+  --preds "../runs/test_code_generation/${model}/predictions.txt"

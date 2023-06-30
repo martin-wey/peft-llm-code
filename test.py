@@ -68,9 +68,8 @@ class EndOfFunctionCriteria(StoppingCriteria):
         return all(done)
 
 
-def test_conala_code_generation(args):
-    dataset = load_conala_dataset()
-    test_dataset = dataset["test"]
+def test_code_generation(args):
+    test_dataset = load_test_dataset()
 
     model, tokenizer = load_model_and_tokenizer(args)
 
@@ -85,14 +84,14 @@ def test_conala_code_generation(args):
                                      \n### Answer:\n{examples[f'solution{n}']}\n"
 
     def preprocess_function_dec(example):
-        prompt = "\n### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
         if args.num_few_shot_examples >= 0:
             prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt,
                                  truncation=True,
                                  padding="max_length",
                                  max_length=args.conala_max_input_length)
-        labels = tokenizer(example["cmd"],
+        labels = tokenizer(example["canonical_solution"],
                            truncation=True,
                            padding="max_length",
                            max_length=args.conala_max_target_length)["input_ids"]
@@ -101,7 +100,7 @@ def test_conala_code_generation(args):
         return model_inputs
 
     def preprocess_function_encdec(example):
-        prompt = "\n### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
         if args.num_few_shot_examples >= 0:
             prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt,
@@ -109,7 +108,7 @@ def test_conala_code_generation(args):
                                  padding="max_length",
                                  max_length=args.conala_max_input_length,
                                  add_special_tokens=True)
-        labels = tokenizer(example["cmd"],
+        labels = tokenizer(example["canonical_solution"],
                            truncation=True,
                            padding="max_length",
                            max_length=args.conala_max_target_length)["input_ids"]
@@ -174,10 +173,10 @@ def test_conala_code_generation(args):
             fref.write(reference.replace("\n", " ") + "\n")
 
 
-def test_odex_pass_at_k(args):
+def test_pass_at_k(args):
     os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
-    dataset = load_odex_dataset()
+    dataset = load_test_dataset()
     code_eval_metric = evaluate.load("code_eval")
 
     model, tokenizer = load_model_and_tokenizer(args)
@@ -257,7 +256,7 @@ def test_odex_pass_at_k(args):
         ])
         references.append(check_function)
 
-    pass_at_k, _ = code_eval_metric.compute(
+    pass_at_k, results = code_eval_metric.compute(
         references=references, predictions=code_gens, num_workers=args.num_workers, k=[1, 2, 5, 10]
     )
     print(f"Results: {pass_at_k}")
