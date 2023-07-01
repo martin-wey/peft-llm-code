@@ -24,7 +24,6 @@ def load_model_and_tokenizer(args):
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         if args.training_method == "lora":
             peft_config = LoraConfig(task_type=peft_task_type,
-                                     inference_mode=False,
                                      r=args.lora_r,
                                      lora_alpha=args.lora_alpha,
                                      target_modules=LORA_TARGET_MODULES[args.model_name],
@@ -32,7 +31,6 @@ def load_model_and_tokenizer(args):
                                      bias="none")
         elif args.training_method == "prefix-tuning":
             peft_config = PrefixTuningConfig(task_type=peft_task_type,
-                                             inference_mode=False,
                                              num_virtual_tokens=args.num_virtual_tokens)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
