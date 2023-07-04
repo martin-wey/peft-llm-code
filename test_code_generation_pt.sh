@@ -10,7 +10,7 @@ gpu_id=$4
 model_name=$(echo "$model" | cut -d '/' -f 2)
 
 for num_virtual_tokens in "${n_tokens[@]}"; do
-  run_name="${model_name}_pt${num_virtual_tokens}"
+  run_name="${model_name}_prompt${num_virtual_tokens}"
   output_dir="runs/test_code_generation/${run_name}/"
 
   if [[ ! -d "$output_dir" ]]; then
@@ -21,10 +21,8 @@ for num_virtual_tokens in "${n_tokens[@]}"; do
     --task "code_generation" \
     --model_name_or_path $model \
     --model_type $model_type \
-    --training_method "prefix-tuning" \
+    --training_method "prompt-tuning" \
     --adapter_path "runs/checkpoints/${run_name}/best_model_checkpoint" \
     --output_dir $output_dir \
-    --batch_size $batch_size \
-    --num_beams 4 \
     --do_test
 done

@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -9,6 +10,7 @@ from peft import PeftModel
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import \
+    AutoModelForCausalLM, \
     AutoTokenizer, \
     default_data_collator, \
     StoppingCriteriaList, \
@@ -23,16 +25,13 @@ HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif", "
 
 
 def load_model_and_tokenizer(args):
-    kwargs = {"trust_remote_code": True}
     if args.training_method == "ft":
-        if args.fp16:
-            kwargs["torch_dtype"] = torch.float16
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path, **kwargs).to(args.device)
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path).to(args.device)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     else:
-        inference_model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
-                                                                                torch_dtype=torch.float16,
-                                                                                **kwargs)
+        inference_model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
+                                                               torch_dtype=torch.float16,
+                                                               trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         model = PeftModel.from_pretrained(inference_model, args.adapter_path).to(args.device)
         model.print_trainable_parameters()
@@ -45,8 +44,7 @@ def load_model_and_tokenizer(args):
         tokenizer.eos_token_id = 2
         tokenizer.pad_token_id = 1
 
-    if args.model_type == "decoder":
-        tokenizer.padding_side = "left"
+    tokenizer.padding_side = "left"
 
     return model, tokenizer
 
@@ -77,100 +75,79 @@ def test_code_generation(args):
         # zero-shot learning
         few_shot_prompt = "Generate one line of Python code given an instruction."
         if args.num_few_shot_examples > 0:
-            # few-shot learning
-            examples = read_conala_few_shot_examples()
+            # in-context learning
+            examples = read_icl_examples()
             for n in range(1, args.num_few_shot_examples + 1):
                 few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
                                      \n### Answer:\n{examples[f'solution{n}']}\n"
 
-    def preprocess_function_dec(example):
-        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
+    def preprocess_function(example):
+        prompt = "### Instruction:\n" + example["intent"] + "\n### Answer:\n"
         if args.num_few_shot_examples >= 0:
             prompt = few_shot_prompt + prompt
-        model_inputs = tokenizer(prompt,
-                                 truncation=True,
-                                 padding="max_length",
-                                 max_length=args.conala_max_input_length)
-        labels = tokenizer(example["canonical_solution"],
-                           truncation=True,
-                           padding="max_length",
-                           max_length=args.conala_max_target_length)["input_ids"]
+        # no need to pad/truncate, we do not do batched generation
+        model_inputs = tokenizer(prompt)
+        # we also tokenize the solution as each LLM has a specific tokenization process
+        labels = tokenizer(example["canonical_solution"])["input_ids"]
         model_inputs["labels"] = labels
 
         return model_inputs
 
-    def preprocess_function_encdec(example):
-        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
-        if args.num_few_shot_examples >= 0:
-            prompt = few_shot_prompt + prompt
-        model_inputs = tokenizer(prompt,
-                                 truncation=True,
-                                 padding="max_length",
-                                 max_length=args.conala_max_input_length,
-                                 add_special_tokens=True)
-        labels = tokenizer(example["canonical_solution"],
-                           truncation=True,
-                           padding="max_length",
-                           max_length=args.conala_max_target_length)["input_ids"]
-        model_inputs["labels"] = labels
-
-        return model_inputs
-
-    preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
     test_dataset = test_dataset.map(preprocess_function,
                                     num_proc=args.num_workers,
                                     remove_columns=[cname for cname in test_dataset.column_names if
-                                                    cname not in ["input_ids", "attention_mask", "labels"]],
+                                                    cname not in ["input_ids", "labels"]],
                                     desc="Generating samples features.")
-    dataloader = DataLoader(test_dataset,
-                            batch_size=args.batch_size,
-                            collate_fn=default_data_collator,
-                            pin_memory=True)
+    dataloader = DataLoader(test_dataset, batch_size=1, collate_fn=default_data_collator, pin_memory=True)
 
-    predictions = []
+    gen_kwargs = {
+        "do_sample": True,
+        "temperature": 0.8,
+        "max_new_tokens": args.max_target_length,
+        "num_return_sequences": args.num_return_sequences,
+        "top_p": 0.95,
+        "top_k": 0
+    }
+
+    predictions = [[] for _ in range(len(test_dataset))]
     references = []
-    for batch in tqdm(dataloader, total=len(test_dataset) // args.batch_size):
-        batch = {k: v.to(args.device) for k, v in batch.items()}
+    for step, sample in tqdm(enumerate(dataloader), total=len(test_dataset)):
         with torch.no_grad():
-            batch_generation = model.generate(
-                input_ids=batch["input_ids"],
-                attention_mask=batch["attention_mask"],
-                num_beams=args.num_beams,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                max_new_tokens=args.conala_max_target_length,
+            generated_sequences = model.generate(
+                input_ids=sample["input_ids"].to(args.device),
                 stopping_criteria=StoppingCriteriaList(
-                    [EndOfFunctionCriteria(batch["input_ids"].shape[1], EOF_STRINGS, tokenizer)]
-                )
+                    [EndOfFunctionCriteria(sample["input_ids"].shape[1], EOF_STRINGS, tokenizer)]
+                ),
+                **gen_kwargs
             )
-            if args.model_type == "decoder":
-                batch_generated_tokens = tokenizer.batch_decode(batch_generation[:, batch["input_ids"].shape[1]:],
-                                                                skip_special_tokens=True)
-            else:
-                batch_generated_tokens = tokenizer.batch_decode(batch_generation, skip_special_tokens=True)
-            batch_references = tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
+            generated_sequences = generated_sequences.cpu().numpy()
+            generated_new_tokens = generated_sequences[:, sample["input_ids"].shape[1]:]
 
-            if "incoder" in args.model_name:
-                # somehow the pad tokens do not get filtered when decoding with InCoder
-                batch_references = [ref.replace("<pad>", "") for ref in batch_references]
+            for task, new_tokens in zip([step] * args.num_return_sequences, generated_new_tokens):
+                new_tokens_decoded = tokenizer.decode(new_tokens, skip_special_tokens=True,
+                                                      clean_up_tokenization_spaces=True)
+                new_tokens_decoded = re.split("(%s)" % "|".join(EOF_STRINGS), new_tokens_decoded.strip())[0]
+                predictions[task].append(new_tokens_decoded)
 
-            for generation in batch_generated_tokens:
-                gen_code = re.split("(%s)" % "|".join(EOF_STRINGS), generation)[0]
-                predictions.append(gen_code)
+            reference_decoded = tokenizer.decode(sample["labels"][0], skip_special_tokens=True,
+                                                 clean_up_tokenization_spaces=True)
+            references.append(reference_decoded)
 
-            references += [tokens for tokens in batch_references]
+    jsonl_data = []
+    for preds, refs in zip(predictions, references):
+        jsonl_data.append({
+            "predictions": preds,
+            "references": refs
+        })
 
     logger.info(f"Exporting test predictions in directory {args.output_dir}.")
-    pred_fname = "predictions.txt"
-    ref_fname = "references.txt"
+    fname = "output.jsonl"
     if args.num_few_shot_examples > -1:
-        pred_fname = f"predictions_{args.num_few_shot_examples}shot.txt"
-        ref_fname = f"references_{args.num_few_shot_examples}shot.txt"
-    with open(os.path.join(args.output_dir, pred_fname), "w", encoding="utf-8") as fpred, \
-            open(os.path.join(args.output_dir, ref_fname), "w", encoding="utf-8") as fref:
-        for prediction, reference, dataset in zip(predictions, references, test_dataset):
-            fpred.write(prediction.replace("\n", " ") + "\n")
-            fref.write(reference.replace("\n", " ") + "\n")
+        fname = f"output_{args.num_few_shot_examples}shot.jsonl"
+    with open(os.path.join(args.output_dir, fname), "w", encoding="utf-8") as fout:
+        for entry in jsonl_data:
+            json.dump(entry, fout)
+            fout.write("\n")
 
 
 def test_pass_at_k(args):
@@ -186,26 +163,18 @@ def test_pass_at_k(args):
         few_shot_prompt = "Generate one line of Python code given an instruction."
         if args.num_few_shot_examples > 0:
             # few-shot learning
-            examples = read_conala_few_shot_examples()
+            examples = read_icl_examples()
             for n in range(1, args.num_few_shot_examples + 1):
                 few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
                                      \n### Answer:\n{examples[f'solution{n}']}\n"
 
-    def preprocess_function_dec(example):
+    def preprocess_function(example):
         prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
         if args.num_few_shot_examples >= 0:
             prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt)
         return model_inputs
 
-    def preprocess_function_encdec(example):
-        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
-        if args.num_few_shot_examples >= 0:
-            prompt = few_shot_prompt + prompt
-        model_inputs = tokenizer(prompt)
-        return model_inputs
-
-    preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
     test_dataset = dataset.map(preprocess_function,
                                num_proc=args.num_workers,
                                remove_columns=dataset.column_names,

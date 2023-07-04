@@ -27,7 +27,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name_or_path", default="NinedayWang/PolyCoder-160M", type=str,
                         help="Name of the pretrained model on Huggingface Hub or in local storage.")
-    parser.add_argument("--model_type", default="decoder", type=str, help="Model architecture type.")
     parser.add_argument("--output_dir", default="./runs", type=str, help="Output directory.")
     parser.add_argument("--run_name", default=None, type=str)
 
@@ -46,8 +45,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0)
     parser.add_argument("--fp16", type=bool, default=False)
 
-    parser.add_argument("--conala_max_input_length", default=64, type=int)
-    parser.add_argument("--conala_max_target_length", default=64, type=int)
+    parser.add_argument("--max_input_length", default=64, type=int)
+    parser.add_argument("--max_target_length", default=64, type=int)
 
     parser.add_argument("--human_eval_max_new_tokens", default=256, type=int)
 

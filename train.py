@@ -1,37 +1,39 @@
 import torch
-from peft import get_peft_model, TaskType, LoraConfig, PrefixTuningConfig
+from peft import get_peft_model, TaskType, LoraConfig, PromptTuningConfig
 from transformers import \
+    AutoModelForCausalLM, \
     AutoTokenizer, \
     default_data_collator, \
     TrainingArguments, \
     Trainer, \
-    Seq2SeqTrainingArguments, \
-    Seq2SeqTrainer, \
     EarlyStoppingCallback
 
-from utils import *
+from utils import load_train_dataset, LORA_TARGET_MODULES
 
 
 def load_model_and_tokenizer(args):
-    peft_task_type = TaskType.SEQ_2_SEQ_LM if args.model_type == "encoder-decoder" else TaskType.CAUSAL_LM
     if args.training_method == "ft":
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path)
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     else:
-        model = GENERATION_MODEL_CLS[args.model_type].from_pretrained(args.model_name_or_path,
-                                                                      torch_dtype=torch.float16,
-                                                                      trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
+                                                     torch_dtype=torch.float16,
+                                                     trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         if args.training_method == "lora":
-            peft_config = LoraConfig(task_type=peft_task_type,
+            peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
                                      r=args.lora_r,
                                      lora_alpha=args.lora_alpha,
                                      target_modules=LORA_TARGET_MODULES[args.model_name],
                                      lora_dropout=args.lora_dropout,
                                      bias="none")
-        elif args.training_method == "prefix-tuning":
-            peft_config = PrefixTuningConfig(task_type=peft_task_type,
-                                             num_virtual_tokens=args.num_virtual_tokens)
+        elif args.training_method == "prompt-tuning":
+            peft_config = PromptTuningConfig(task_type=TaskType.CAUSAL_LM,
+                                             prompt_tuning_init="TEXT",
+                                             prompt_tuning_init_text="Generate one line of Python code given an "
+                                                                     "instruction",
+                                             num_virtual_tokens=args.num_virtual_tokens,
+                                             tokenizer_name_or_path=args.model_name_or_path)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
@@ -43,19 +45,18 @@ def load_model_and_tokenizer(args):
         tokenizer.eos_token_id = 2
         tokenizer.pad_token_id = 1
 
-    if args.model_type == "decoder":
-        tokenizer.padding_side = "left"
+    tokenizer.padding_side = "left"
 
     return model, tokenizer
 
 
 def train_code_generation(args):
-    dataset = load_conala_dataset()
+    dataset = load_train_dataset()
     del dataset["test"]
 
     model, tokenizer = load_model_and_tokenizer(args)
 
-    def preprocess_function_dec(example):
+    def preprocess_function(example):
         """
         # we tokenize, pad and truncate the samples in the following way:
         #   <pad><pad>...### Instruction:\n<intent>\n### Answer:\n<snippet><eos>
@@ -65,14 +66,14 @@ def train_code_generation(args):
         """
         tokenized_target = tokenizer(example["cmd"],
                                      truncation=True,
-                                     max_length=args.conala_max_target_length - 1,
+                                     max_length=args.max_target_length - 1,
                                      # incoder adds eos token before the start of a sequence -> ignore
                                      add_special_tokens=False)
         tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
         tokenized_target["attention_mask"] = tokenized_target["attention_mask"] + [1]
 
         prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
-        max_prompt_len = (args.conala_max_input_length + args.conala_max_target_length) - \
+        max_prompt_len = (args.max_input_length + args.max_target_length) - \
                          len(tokenized_target["input_ids"])
         model_inputs = tokenizer(prompt,
                                  truncation=True,
@@ -85,33 +86,12 @@ def train_code_generation(args):
 
         return model_inputs
 
-    def preprocess_function_encdec(example):
-        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
-        model_inputs = tokenizer(prompt,
-                                 truncation=True,
-                                 padding="max_length",
-                                 max_length=args.conala_max_input_length,
-                                 add_special_tokens=True)
-        tokenized_target = tokenizer(example["cmd"],
-                                     truncation=True,
-                                     padding="max_length",
-                                     max_length=args.conala_max_target_length,
-                                     add_special_tokens=True)
-        labels = tokenized_target["input_ids"]
-        labels = [label if label != tokenizer.pad_token_id else -100 for label in labels]
-        model_inputs["labels"] = labels
-
-        return model_inputs
-
-    preprocess_function = preprocess_function_dec if args.model_type == "decoder" else preprocess_function_encdec
     dataset = dataset.map(preprocess_function,
                           num_proc=args.num_workers,
                           remove_columns=dataset["train"].column_names,
                           desc="Generating samples features.")
 
-    training_args_cls = Seq2SeqTrainingArguments if args.model_type == "encoder-decoder" else TrainingArguments
-    trainer_cls = Seq2SeqTrainer if args.model_type == "encoder-decoder" else Trainer
-    training_args = training_args_cls(
+    training_args = TrainingArguments(
         output_dir=args.run_dir,
         evaluation_strategy="epoch",
         save_strategy="epoch",
@@ -128,9 +108,9 @@ def train_code_generation(args):
         logging_steps=20,
         save_total_limit=2,
         load_best_model_at_end=True,
-        report_to="wandb" if args.use_wandb else "none"
+        report_to=["wandb"] if args.use_wandb else ["none"]
     )
-    trainer = trainer_cls(
+    trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset["train"],
