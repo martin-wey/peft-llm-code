@@ -1,8 +1,23 @@
 import argparse
+import json
 import re
-from statistics import mean
 
 from utils import load_test_dataset
+
+
+def compute_exact_match(predictions, references, k):
+    num_correct = 0
+    total = len(predictions)
+
+    for i in range(total):
+        prediction = predictions[i][:k]  # Get the top-k predictions
+        reference = references[i]
+
+        if reference in prediction:
+            num_correct += 1
+
+    accuracy = num_correct / total
+    return accuracy
 
 
 def retrieve_hints_from_intent(text):
@@ -14,13 +29,27 @@ def retrieve_hints_from_intent(text):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--preds')
-    parser.add_argument('--refs')
+    parser.add_argument("--output_file", "-ref", help="Jsonl file containing the predictions and references.")
+
     args = parser.parse_args()
 
-    dataset = load_test_dataset()
-    predictions = [x.strip() for x in open(args.preds, 'r', encoding='utf-8').readlines()]
-    references = [x.strip() for x in open(args.refs, 'r', encoding='utf-8').readlines()]
+    predictions = []
+    references = []
+    with open(args.output_file, "r", encoding="utf-8") as file:
+        for line in file:
+            json_data = json.loads(line)
+            predictions.append(json_data["predictions"])
+            references.append(json_data["references"])
+
+    em_at_1 = compute_exact_match(predictions, references, 1)
+    em_at_2 = compute_exact_match(predictions, references, 2)
+    em_at_5 = compute_exact_match(predictions, references, 5)
+    em_at_10 = compute_exact_match(predictions, references, 10)
+
+    print(f"EM@1: {em_at_1} | EM@2: {em_at_2} | EM@5: {em_at_5} | EM@10: {em_at_10}")
+
+    """
+
 
     domain_scores_dict = {"None": []}
     for (sample, pred, ref) in zip(dataset, predictions, references):
@@ -60,6 +89,7 @@ def main():
             if hint in pred:
                 acc += 1
     print(round((acc / n_hints) * 100, 3))
+    """
 
 
 if __name__ == "__main__":

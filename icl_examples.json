@@ -1,12 +1,12 @@
 {
-  "instruction1": "sort list `users` using values associated with key 'id' according to elements in list `order`",
-  "instruction2": "Determine the byte length of a utf-8 encoded string `s`",
-  "instruction3": "Replace non-ASCII characters in string `text` with a single space",
-  "instruction4": "merge rows from dataframe `df1` with rows from dataframe `df2` and calculate the mean for rows that have the same value of axis 1",
-  "instruction5": "Create list `listy` containing 3 empty lists",
-  "solution1": "users.sort(key=lambda x: order.index(x['id']))",
-  "solution2": "len(s.encode('utf-8'))",
-  "solution3": "re.sub('[^\\\\x00-\\\\x7F]+', ' ', text)",
-  "solution4": "pd.concat((df1, df2), axis=1).mean(axis=1)",
-  "solution5": "listy = [[] for i in range(3)]"
+  "instruction1": "Create list `listy` containing 3 empty lists",
+  "solution1": "listy = [[] for i in range(3)]",
+  "instruction2": "Solve for the least squares' solution of matrices `a` and `b`",
+  "solution2": "np.linalg.solve(np.dot(a.T, a), np.dot(a.T, b))",
+  "instruction3": "Drop a single subcolumn 'a' in column 'col1' from a dataframe `df`",
+  "solution3": "df.drop(('col1', 'a'), axis=1)",
+  "instruction4": "remove tags from a string `mystring`",
+  "solution4": "re.sub('<[^>]*>', '', mystring)",
+  "instruction5": "convert a python dictionary 'a' to a list of tuples",
+  "solution5": "[(k, v) for k, v in a.items()]"
 }

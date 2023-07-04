@@ -19,7 +19,7 @@ for n_shot in "${n_shots[@]}"; do
     --task "code_generation" \
     --model_name_or_path $model \
     --output_dir $output_dir \
-    --num_few_shot_examples $n_shots \
+    --num_few_shot_examples $n_shot \
     --fp16 True \
     --do_test
 done

@@ -20,13 +20,17 @@ from utils import *
 
 logger = logging.getLogger(__name__)
 
+
 EOF_STRINGS = ["<|endoftext|>", "</s>", "\n"]
 HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif", "\n#"]
 
 
 def load_model_and_tokenizer(args):
+    model_kwargs = {}
     if args.training_method == "ft":
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path).to(args.device)
+        if args.fp16:
+            model_kwargs["torch_dtype"] = torch.float16
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs).to(args.device)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     else:
         inference_model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
@@ -73,7 +77,7 @@ def test_code_generation(args):
 
     if args.num_few_shot_examples > -1:
         # zero-shot learning
-        few_shot_prompt = "Generate one line of Python code given an instruction."
+        few_shot_prompt = "Generate a single line of Python code given an instruction."
         if args.num_few_shot_examples > 0:
             # in-context learning
             examples = read_icl_examples()
@@ -83,12 +87,12 @@ def test_code_generation(args):
 
     def preprocess_function(example):
         prompt = "### Instruction:\n" + example["intent"] + "\n### Answer:\n"
-        if args.num_few_shot_examples >= 0:
+        if args.num_few_shot_examples > -1:
             prompt = few_shot_prompt + prompt
         # no need to pad/truncate, we do not do batched generation
         model_inputs = tokenizer(prompt)
-        # we also tokenize the solution as each LLM has a specific tokenization process
-        labels = tokenizer(example["canonical_solution"])["input_ids"]
+
+        labels = tokenizer(example["canonical_solution"].strip())["input_ids"]
         model_inputs["labels"] = labels
 
         return model_inputs
@@ -100,25 +104,19 @@ def test_code_generation(args):
                                     desc="Generating samples features.")
     dataloader = DataLoader(test_dataset, batch_size=1, collate_fn=default_data_collator, pin_memory=True)
 
-    gen_kwargs = {
-        "do_sample": True,
-        "temperature": 0.8,
-        "max_new_tokens": args.max_target_length,
-        "num_return_sequences": args.num_return_sequences,
-        "top_p": 0.95,
-        "top_k": 0
-    }
-
     predictions = [[] for _ in range(len(test_dataset))]
     references = []
     for step, sample in tqdm(enumerate(dataloader), total=len(test_dataset)):
         with torch.no_grad():
             generated_sequences = model.generate(
                 input_ids=sample["input_ids"].to(args.device),
+                num_beams=args.num_beams,
+                temperature=args.temperature,
+                max_new_tokens=args.max_target_length,
+                num_return_sequences=args.num_return_sequences,
                 stopping_criteria=StoppingCriteriaList(
                     [EndOfFunctionCriteria(sample["input_ids"].shape[1], EOF_STRINGS, tokenizer)]
-                ),
-                **gen_kwargs
+                )
             )
             generated_sequences = generated_sequences.cpu().numpy()
             generated_new_tokens = generated_sequences[:, sample["input_ids"].shape[1]:]
@@ -127,19 +125,21 @@ def test_code_generation(args):
                 new_tokens_decoded = tokenizer.decode(new_tokens, skip_special_tokens=True,
                                                       clean_up_tokenization_spaces=True)
                 new_tokens_decoded = re.split("(%s)" % "|".join(EOF_STRINGS), new_tokens_decoded.strip())[0]
+                new_tokens_decoded = new_tokens_decoded.replace("\n", " ").replace("\t", " ")
                 predictions[task].append(new_tokens_decoded)
 
             reference_decoded = tokenizer.decode(sample["labels"][0], skip_special_tokens=True,
                                                  clean_up_tokenization_spaces=True)
+            reference_decoded = reference_decoded.replace("\n", " ").replace("\t", " ")
             references.append(reference_decoded)
 
+    # export top-10 predictions
     jsonl_data = []
     for preds, refs in zip(predictions, references):
         jsonl_data.append({
             "predictions": preds,
             "references": refs
         })
-
     logger.info(f"Exporting test predictions in directory {args.output_dir}.")
     fname = "output.jsonl"
     if args.num_few_shot_examples > -1:
@@ -148,6 +148,19 @@ def test_code_generation(args):
         for entry in jsonl_data:
             json.dump(entry, fout)
             fout.write("\n")
+
+    # export top-1 predictions
+    predictions = [p[0] for p in predictions]
+    pred_fname = "predictions.txt"
+    ref_fname = "references.txt"
+    if args.num_few_shot_examples > -1:
+        pred_fname = f"predictions_{args.num_few_shot_examples}shot.txt"
+        ref_fname = f"references_{args.num_few_shot_examples}shot.txt"
+    with open(os.path.join(args.output_dir, pred_fname), "w", encoding="utf-8") as fpred, \
+            open(os.path.join(args.output_dir, ref_fname), "w", encoding="utf-8") as fref:
+        for prediction, reference in zip(predictions, references):
+            fpred.write(prediction + "\n")
+            fref.write(reference + "\n")
 
 
 def test_pass_at_k(args):
