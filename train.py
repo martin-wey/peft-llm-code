@@ -1,3 +1,5 @@
+import logging
+
 import torch
 from peft import get_peft_model, TaskType, LoraConfig, PromptTuningConfig, PeftModel
 from transformers import \
@@ -11,23 +13,24 @@ from transformers import \
 from utils import load_train_dataset, LORA_TARGET_MODULES
 
 
+logger = logging.getLogger(__name__)
+
+
 def load_model_and_tokenizer(args):
     if args.training_method == "ft":
         model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     else:
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
+                                                     torch_dtype=torch.float16,
+                                                     trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+
         if args.adapter_path is not None:
-            inference_model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
-                                                                   torch_dtype=torch.float16,
-                                                                   trust_remote_code=True)
-            tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-            model = PeftModel.from_pretrained(inference_model, args.adapter_path, is_trainable=True).to(args.device)
+            # continue fine-tuning an existing PEFT checkpoint
+            model = PeftModel.from_pretrained(model, args.adapter_path, is_trainable=True).to(args.device)
             model.print_trainable_parameters()
         else:
-            model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
-                                                         torch_dtype=torch.float16,
-                                                         trust_remote_code=True)
-            tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
             if args.training_method == "lora":
                 peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
                                          r=args.lora_r,
@@ -60,7 +63,10 @@ def load_model_and_tokenizer(args):
 
 def train_code_generation(args):
     dataset = load_train_dataset()
+    code_column = "cmd"
+    intent_column = "nl"
     del dataset["test"]
+    print(dataset["train"], dataset["validation"])
 
     model, tokenizer = load_model_and_tokenizer(args)
 
@@ -72,7 +78,7 @@ def train_code_generation(args):
         #   - prompt tokens `<pad><pad>...<intent + \n>` are ignored in the computation of the loss (-100 labels)
         #   - `<eos>` delimits the snippet and allows the model to have more focused predictions at inference
         """
-        tokenized_target = tokenizer(example["cmd"],
+        tokenized_target = tokenizer(example[code_column],
                                      truncation=True,
                                      max_length=args.max_target_length - 1,
                                      # incoder adds eos token before the start of a sequence -> ignore
@@ -80,7 +86,7 @@ def train_code_generation(args):
         tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
         tokenized_target["attention_mask"] = tokenized_target["attention_mask"] + [1]
 
-        prompt = "### Instruction:\n" + example["nl"] + "\n### Answer:\n"
+        prompt = "### Instruction:\n" + example[intent_column] + "\n### Answer:\n"
         max_prompt_len = (args.max_input_length + args.max_target_length) - \
                          len(tokenized_target["input_ids"])
         model_inputs = tokenizer(prompt,
@@ -127,6 +133,8 @@ def train_code_generation(args):
         data_collator=default_data_collator,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
+    eval_results = trainer.evaluate()
+    logger.info(f"Evaluation loss before training: {round(eval_results['eval_loss'], 4)}")
     trainer.train()
     # save best model after training
     trainer.model.save_pretrained(f"{args.run_dir}/best_model_checkpoint")

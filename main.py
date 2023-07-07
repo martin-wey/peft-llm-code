@@ -48,7 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_input_length", default=64, type=int)
     parser.add_argument("--max_target_length", default=64, type=int)
 
-    parser.add_argument("--test_dataset", default="odex", type=str)
+    parser.add_argument("--test_dataset", default="conala", type=str)
     parser.add_argument("--temperature", default=0.8, type=float)
     parser.add_argument("--num_beams", default=10, type=int)
     parser.add_argument("--num_return_sequences", type=int, default=10)
