@@ -159,4 +159,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-/_old/
+/results_analysis.py
+/data_analysis.py
+/data_augmentation/
+/ttest/
+/results/

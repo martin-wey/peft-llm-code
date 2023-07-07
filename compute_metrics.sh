@@ -20,23 +20,17 @@ training_method=$2
 test_dataset=$3
 
 if [ "$test_dataset" = "odex" ]; then
-  prefix_dir="../runs/test_code_generation_odex"
+  prefix_dir="runs/test_code_generation_odex"
 else
-  prefix_dir="../runs/test_code_generation_conala"
+  prefix_dir="runs/test_code_generation_conala"
 fi
 
-if [ "${training_method}" = "ft" ]; then
-  python evaluator.py \
-    --refs "${prefix_dir}/${model}/references.txt" \
-    --preds "${prefix_dir}/${model}/predictions.txt"
-
-elif [ "${training_method}" = "icl" ]; then
+if [ "${training_method}" = "icl" ]; then
   for n_shot in "${n_shots[@]}"; do
     echo "${model} - ${n_shot}-shot"
 
-    python evaluator.py \
-      --refs "${prefix_dir}/${model}/references_${n_shot}shot.txt" \
-      --preds "${prefix_dir}/${model}/predictions_${n_shot}shot.txt"
+    python compute_metrics.py \
+      --output_file "${prefix_dir}/${model}/output_${n_shot}shot.jsonl"
   done
 
 elif [ "${training_method}" = "lora" ]; then
@@ -47,9 +41,8 @@ elif [ "${training_method}" = "lora" ]; then
     run_name="${model}_lora_r${lora_r}a${lora_alpha}"
     echo $run_name
 
-    python evaluator.py \
-      --refs "${prefix_dir}/${run_name}/references.txt" \
-      --preds "${prefix_dir}/${run_name}/predictions.txt"
+    python compute_metrics.py \
+      --output_file "${prefix_dir}/${run_name}/output.jsonl"
   done
 
 elif [ "${training_method}" = "prompt-tuning" ]; then
@@ -57,8 +50,7 @@ elif [ "${training_method}" = "prompt-tuning" ]; then
     run_name="${model}_prompt${num_virtual_tokens}"
     echo $run_name
 
-    python evaluator.py \
-      --refs "${prefix_dir}/${run_name}/references.txt" \
-      --preds "${prefix_dir}/${run_name}/predictions.txt"
+    python compute_metrics.py \
+      --output_file "${prefix_dir}/${run_name}/output.jsonl"
   done
 fi

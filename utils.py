@@ -27,11 +27,16 @@ def read_icl_examples():
     return examples
 
 
-def load_test_dataset():
+def load_odex_test_dataset():
     dataset = load_dataset("neulab/odex")["test"]
     conala = load_dataset("neulab/docprompting-conala")["train"]
 
     # make sure we remove test samples that appear in the fine-tuning dataset to avoid data leakage
     dataset = dataset.filter(lambda example: example["intent"] not in conala["nl"])
 
+    return dataset
+
+
+def load_conala_test_dataset():
+    dataset = load_dataset("neulab/docprompting-conala")["test"]
     return dataset

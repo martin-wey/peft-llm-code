@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import re
@@ -19,10 +18,7 @@ from transformers import \
 from utils import *
 
 logger = logging.getLogger(__name__)
-
-
 EOF_STRINGS = ["<|endoftext|>", "</s>", "\n"]
-HUMAN_EVAL_EOF_STRINGS = ["\nclass", "\ndef", "\n#", "\n@", "\nprint", "\nif", "\n#"]
 
 
 def load_model_and_tokenizer(args):
@@ -71,7 +67,14 @@ class EndOfFunctionCriteria(StoppingCriteria):
 
 
 def test_code_generation(args):
-    test_dataset = load_test_dataset()
+    if args.test_dataset == "odex":
+        test_dataset = load_odex_test_dataset()
+        intent_column = "intent"
+        code_column = "canonical_solution"
+    else:
+        test_dataset = load_conala_test_dataset()
+        intent_column = "nl"
+        code_column = "cmd"
 
     model, tokenizer = load_model_and_tokenizer(args)
 
@@ -86,13 +89,13 @@ def test_code_generation(args):
                                      \n### Answer:\n{examples[f'solution{n}']}\n"
 
     def preprocess_function(example):
-        prompt = "### Instruction:\n" + example["intent"] + "\n### Answer:\n"
+        prompt = "### Instruction:\n" + example[intent_column] + "\n### Answer:\n"
         if args.num_few_shot_examples > -1:
             prompt = few_shot_prompt + prompt
         # no need to pad/truncate, we do not do batched generation
         model_inputs = tokenizer(prompt)
 
-        labels = tokenizer(example["canonical_solution"].strip())["input_ids"]
+        labels = tokenizer(example[code_column].strip())["input_ids"]
         model_inputs["labels"] = labels
 
         return model_inputs
@@ -166,7 +169,7 @@ def test_code_generation(args):
 def test_pass_at_k(args):
     os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
-    dataset = load_test_dataset()
+    dataset = load_odex_test_dataset()
     code_eval_metric = evaluate.load("code_eval")
 
     model, tokenizer = load_model_and_tokenizer(args)
@@ -247,67 +250,4 @@ def test_pass_at_k(args):
     if args.num_few_shot_examples > -1:
         fname = f"odex_results_{args.num_few_shot_examples}shot.json"
     with open(f"{args.output_dir}/{fname}", "w") as fp:
-        json.dump(pass_at_k, fp)
-
-
-def test_human_eval(args):
-    os.environ["HF_ALLOW_CODE_EVAL"] = "1"
-
-    human_eval = load_dataset("openai_humaneval")
-    code_eval_metric = evaluate.load("code_eval")
-
-    model, tokenizer = load_model_and_tokenizer(args)
-
-    test_dataset = human_eval.map(lambda example: tokenizer(example["prompt"].strip()),
-                                  num_proc=args.num_workers,
-                                  desc="Generating samples features.")["test"]
-
-    dataloader = DataLoader(test_dataset,
-                            batch_size=1,
-                            collate_fn=default_data_collator,
-                            pin_memory=True)
-
-    gen_token_dict = defaultdict(list)
-    for step, sample in tqdm(enumerate(dataloader), total=len(test_dataset)):
-        with torch.no_grad():
-            generated_sequences = model.generate(
-                input_ids=sample["input_ids"].to(args.device),
-                num_beams=args.num_beams,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                max_new_tokens=args.human_eval_max_new_tokens,
-                num_return_sequences=args.num_return_sequences,
-                stopping_criteria=StoppingCriteriaList(
-                    [EndOfFunctionCriteria(sample["input_ids"].shape[1], HUMAN_EVAL_EOF_STRINGS, tokenizer)]
-                )
-            )
-            generated_sequences = generated_sequences.cpu().numpy()
-            func_signatures = generated_sequences[:, :sample["input_ids"].shape[1]]
-            new_tokens = generated_sequences[:, sample["input_ids"].shape[1]:]
-
-            for task, func_signatures, new_tokens in zip([step] * args.num_return_sequences,
-                                                         func_signatures,
-                                                         new_tokens):
-                gen_token_dict[task].append((func_signatures, new_tokens))
-
-    code_gens = [[] for _ in range(len(test_dataset))]
-    for task, generations in gen_token_dict.items():
-        for (signature, gen_tokens) in generations:
-            func_sign = tokenizer.decode(signature, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-            gen_code = tokenizer.decode(gen_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-            gen_code = re.split("(%s)" % "|".join(HUMAN_EVAL_EOF_STRINGS), gen_code)[0]
-            code_gens[task].append(func_sign + gen_code)
-
-    references = []
-    for task in tqdm(range(len(test_dataset))):
-        test_func = human_eval["test"][task]["test"]
-        entry_point = f"check({human_eval['test'][task]['entry_point']})"
-        references.append("\n" + test_func + "\n" + entry_point)
-
-    pass_at_k, _ = code_eval_metric.compute(
-        references=references, predictions=code_gens, num_workers=args.num_workers, k=[1, 2, 5, 10]
-    )
-    print(f"Results: {pass_at_k}")
-
-    with open(f"{args.output_dir}/human_eval_results.json", "w") as fp:
         json.dump(pass_at_k, fp)

@@ -1,5 +1,5 @@
 import torch
-from peft import get_peft_model, TaskType, LoraConfig, PromptTuningConfig
+from peft import get_peft_model, TaskType, LoraConfig, PromptTuningConfig, PeftModel
 from transformers import \
     AutoModelForCausalLM, \
     AutoTokenizer, \
@@ -16,26 +16,34 @@ def load_model_and_tokenizer(args):
         model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
     else:
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
-                                                     torch_dtype=torch.float16,
-                                                     trust_remote_code=True)
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-        if args.training_method == "lora":
-            peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
-                                     r=args.lora_r,
-                                     lora_alpha=args.lora_alpha,
-                                     target_modules=LORA_TARGET_MODULES[args.model_name],
-                                     lora_dropout=args.lora_dropout,
-                                     bias="none")
-        elif args.training_method == "prompt-tuning":
-            peft_config = PromptTuningConfig(task_type=TaskType.CAUSAL_LM,
-                                             prompt_tuning_init="TEXT",
-                                             prompt_tuning_init_text="Generate one line of Python code given an "
-                                                                     "instruction",
-                                             num_virtual_tokens=args.num_virtual_tokens,
-                                             tokenizer_name_or_path=args.model_name_or_path)
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
+        if args.adapter_path is not None:
+            inference_model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
+                                                                   torch_dtype=torch.float16,
+                                                                   trust_remote_code=True)
+            tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+            model = PeftModel.from_pretrained(inference_model, args.adapter_path, is_trainable=True).to(args.device)
+            model.print_trainable_parameters()
+        else:
+            model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
+                                                         torch_dtype=torch.float16,
+                                                         trust_remote_code=True)
+            tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+            if args.training_method == "lora":
+                peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
+                                         r=args.lora_r,
+                                         lora_alpha=args.lora_alpha,
+                                         target_modules=LORA_TARGET_MODULES[args.model_name],
+                                         lora_dropout=args.lora_dropout,
+                                         bias="none")
+            elif args.training_method == "prompt-tuning":
+                peft_config = PromptTuningConfig(task_type=TaskType.CAUSAL_LM,
+                                                 prompt_tuning_init="TEXT",
+                                                 prompt_tuning_init_text="Generate one line of Python code given an "
+                                                                         "instruction",
+                                                 num_virtual_tokens=args.num_virtual_tokens,
+                                                 tokenizer_name_or_path=args.model_name_or_path)
+            model = get_peft_model(model, peft_config)
+            model.print_trainable_parameters()
 
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
