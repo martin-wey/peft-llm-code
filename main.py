@@ -2,25 +2,14 @@ import argparse
 import logging
 from pathlib import Path
 
+import torch
 import wandb
 from transformers import set_seed
 
-import train
-import test
+from train import run_train
+from test import run_test
 
 logger = logging.getLogger(__name__)
-
-
-def main(args):
-    if args.do_train:
-        logger.info(f"[Fine-tuning] Model: {args.model_name_or_path} | Task: {args.task}.")
-        train_func = getattr(train, f"train_{args.task}")
-        train_func(args)
-
-    if args.do_test:
-        logger.info(f"[Test] Model: {args.model_name_or_path} | Task: {args.task}.")
-        test_func = getattr(test, f"test_{args.task}")
-        test_func(args)
 
 
 if __name__ == "__main__":
@@ -30,8 +19,8 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", default="./runs", type=str, help="Output directory.")
     parser.add_argument("--run_name", default=None, type=str)
 
-    parser.add_argument("--task", default="code_generation", type=str,
-                        help="Task on which to fine-tune the model.")
+    parser.add_argument("--dataset", default="conala", type=str,
+                        help="Dataset on which to fine-tune the model.")
     parser.add_argument("--training_method", default="ft", type=str, help="Method used to fine-tuning the model.")
 
     parser.add_argument("--num_epochs", type=int, default=10)
@@ -52,11 +41,12 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", default=0.8, type=float)
     parser.add_argument("--num_beams", default=10, type=int)
     parser.add_argument("--num_return_sequences", type=int, default=10)
+    parser.add_argument("--do_sample", action='store_true', default=False)
 
     parser.add_argument("--adapter_path", default=None, type=str)
 
-    parser.add_argument("--lora_r", default=32, type=int)
-    parser.add_argument("--lora_alpha", default=64, type=int)
+    parser.add_argument("--lora_r", default=16, type=int)
+    parser.add_argument("--lora_alpha", default=32, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)
 
     parser.add_argument("--num_virtual_tokens", default=20, type=int)
@@ -75,11 +65,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
     set_seed(args.seed)
 
+    args.num_gpus = torch.cuda.device_count()
+
     # Setup logging and output directories
     args.model_name = args.model_name_or_path.split('/')[-1]
     if args.do_train:
         if args.run_name is None:
-            args.run_name = f"{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
+            args.run_name = f"{args.dataset}/{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
         args.run_dir = Path(f"{args.output_dir}/checkpoints/{args.run_name}")
         args.run_dir.mkdir(exist_ok=True)
     logging.basicConfig(
@@ -90,6 +82,15 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(project=args.wandb_project_name, name=f"{args.task}/{args.run_name}", config=vars(args), mode="offline")
+        wandb.init(project=args.wandb_project_name,
+                   name=args.run_name,
+                   config=vars(args))
 
-    main(args)
+    if args.do_train:
+        logger.info(f"[Fine-tuning] Model: {args.model_name_or_path} | Dataset: {args.dataset}.")
+        run_train(args)
+
+    if args.do_test:
+        args.output_dir = args.adapter_path
+        logger.info(f"[Test] Model: {args.model_name_or_path} | Dataset: {args.dataset}.")
+        run_test(args)

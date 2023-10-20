@@ -66,7 +66,7 @@ class EndOfFunctionCriteria(StoppingCriteria):
         return all(done)
 
 
-def test_code_generation(args):
+def run_test(args):
     if args.test_dataset == "odex":
         test_dataset = load_odex_test_dataset()
         intent_column = "intent"
