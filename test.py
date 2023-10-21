@@ -18,23 +18,20 @@ from transformers import \
 from utils import *
 
 logger = logging.getLogger(__name__)
-EOF_STRINGS = ["<|endoftext|>", "</s>", "\n"]
+EOF_STRINGS_CONALA = ["<|endoftext|>", "</s>", "\n"]
+EOF_STRINGS_CODEALPACA = ["<|endoftext|>", "</s>"]
 
 
 def load_model_and_tokenizer(args):
-    model_kwargs = {}
     if args.training_method == "ft":
-        if args.fp16:
-            model_kwargs["torch_dtype"] = torch.float16
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs).to(args.device)
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path).to(args.device)
     else:
         inference_model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
                                                                torch_dtype=torch.float16,
                                                                trust_remote_code=True)
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
         model = PeftModel.from_pretrained(inference_model, args.adapter_path).to(args.device)
         model.print_trainable_parameters()
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -67,29 +64,27 @@ class EndOfFunctionCriteria(StoppingCriteria):
 
 
 def run_test(args):
-    if args.test_dataset == "odex":
-        test_dataset = load_odex_test_dataset()
-        intent_column = "intent"
-        code_column = "canonical_solution"
-    else:
-        test_dataset = load_conala_test_dataset()
-        intent_column = "nl"
-        code_column = "cmd"
+    dataset_loading_func = globals().get(f"load_{args.dataset}_test_dataset")
+    test_dataset = dataset_loading_func()
+    intent_column = "nl"
+    code_column = "cmd"
 
     model, tokenizer = load_model_and_tokenizer(args)
 
-    if args.num_few_shot_examples > -1:
+    if args.num_few_shot_examples >= 0:
         # zero-shot learning
-        few_shot_prompt = "Generate a single line of Python code given an instruction."
+        few_shot_prompt = "Generate Python code given the following natural language instruction."
         if args.num_few_shot_examples > 0:
             # in-context learning
-            examples = read_icl_examples()
+            icl_loading_func = globals().get(f"load_{args.dataset}_icl_examples")
+            examples = icl_loading_func()
             for n in range(1, args.num_few_shot_examples + 1):
                 few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
-                                     \n### Answer:\n{examples[f'solution{n}']}\n"
+                                     \n### Response:\n{examples[f'solution{n}']}\n"
 
+    print(few_shot_prompt)
     def preprocess_function(example):
-        prompt = "### Instruction:\n" + example[intent_column] + "\n### Answer:\n"
+        prompt = "### Instruction:\n" + example[intent_column] + "\n### Response:\n"
         if args.num_few_shot_examples > -1:
             prompt = few_shot_prompt + prompt
         # no need to pad/truncate, we do not do batched generation
@@ -107,6 +102,7 @@ def run_test(args):
                                     desc="Generating samples features.")
     dataloader = DataLoader(test_dataset, batch_size=1, collate_fn=default_data_collator, pin_memory=True)
 
+    eof_string = EOF_STRINGS_CONALA if args.dataset == "conala" else EOF_STRINGS_CODEALPACA
     predictions = [[] for _ in range(len(test_dataset))]
     references = []
     for step, sample in tqdm(enumerate(dataloader), total=len(test_dataset)):
@@ -117,8 +113,9 @@ def run_test(args):
                 temperature=args.temperature,
                 max_new_tokens=args.max_target_length,
                 num_return_sequences=args.num_return_sequences,
+                do_sample=args.do_sample,
                 stopping_criteria=StoppingCriteriaList(
-                    [EndOfFunctionCriteria(sample["input_ids"].shape[1], EOF_STRINGS, tokenizer)]
+                    [EndOfFunctionCriteria(sample["input_ids"].shape[1], eof_string, tokenizer)]
                 )
             )
             generated_sequences = generated_sequences.cpu().numpy()
@@ -127,7 +124,7 @@ def run_test(args):
             for task, new_tokens in zip([step] * args.num_return_sequences, generated_new_tokens):
                 new_tokens_decoded = tokenizer.decode(new_tokens, skip_special_tokens=True,
                                                       clean_up_tokenization_spaces=True)
-                new_tokens_decoded = re.split("(%s)" % "|".join(EOF_STRINGS), new_tokens_decoded.strip())[0]
+                new_tokens_decoded = re.split("(%s)" % "|".join(eof_string), new_tokens_decoded.strip())[0]
                 new_tokens_decoded = new_tokens_decoded.replace("\n", " ").replace("\t", " ")
                 predictions[task].append(new_tokens_decoded)
 
@@ -143,29 +140,29 @@ def run_test(args):
             "predictions": preds,
             "references": refs
         })
-    logger.info(f"Exporting test predictions in directory {args.output_dir}.")
-    fname = "output.jsonl"
+    logger.info(f"Exporting test predictions in directory {args.run_dir}.")
+    base_fname = f"output_{args.dataset}"
     if args.num_few_shot_examples > -1:
-        fname = f"output_{args.num_few_shot_examples}shot.jsonl"
-    with open(os.path.join(args.output_dir, fname), "w", encoding="utf-8") as fout:
+        base_fname += f"_{args.num_few_shot_examples}shot"
+    with open(os.path.join(args.run_dir, f"{base_fname}.jsonl"), "w", encoding="utf-8") as fout:
         for entry in jsonl_data:
             json.dump(entry, fout)
             fout.write("\n")
 
     # export top-1 predictions
     predictions = [p[0] for p in predictions]
-    pred_fname = "predictions.txt"
-    ref_fname = "references.txt"
+    base_pred_fname = f"predictions_{args.dataset}.txt"
+    base_ref_fname = f"references_{args.dataset}.txt"
     if args.num_few_shot_examples > -1:
-        pred_fname = f"predictions_{args.num_few_shot_examples}shot.txt"
-        ref_fname = f"references_{args.num_few_shot_examples}shot.txt"
-    with open(os.path.join(args.output_dir, pred_fname), "w", encoding="utf-8") as fpred, \
-            open(os.path.join(args.output_dir, ref_fname), "w", encoding="utf-8") as fref:
+        base_pred_fname += f"_{args.num_few_shot_examples}shot"
+        base_ref_fname += f"_{args.num_few_shot_examples}shot"
+    with open(os.path.join(args.run_dir, f"{base_pred_fname}.txt"), "w", encoding="utf-8") as fpred, \
+            open(os.path.join(args.run_dir, f"{base_ref_fname}.txt"), "w", encoding="utf-8") as fref:
         for prediction, reference in zip(predictions, references):
             fpred.write(prediction + "\n")
             fref.write(reference + "\n")
 
-
+'''
 def test_pass_at_k(args):
     os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
@@ -251,3 +248,4 @@ def test_pass_at_k(args):
         fname = f"odex_results_{args.num_few_shot_examples}shot.json"
     with open(f"{args.output_dir}/{fname}", "w") as fp:
         json.dump(pass_at_k, fp)
+'''

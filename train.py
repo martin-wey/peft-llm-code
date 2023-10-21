@@ -1,14 +1,24 @@
 import logging
 
 import torch
-from peft import get_peft_model, TaskType, LoraConfig, PromptTuningConfig, PeftModel
-from transformers import \
-    AutoModelForCausalLM, \
-    AutoTokenizer, \
-    default_data_collator, \
-    TrainingArguments, \
-    Trainer, \
+from peft import (
+    get_peft_model,
+    TaskType,
+    LoraConfig,
+    IA3Config,
+    PromptTuningConfig,
+    PrefixTuningConfig,
+    PeftModel
+)
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    default_data_collator,
+    TrainingArguments,
+    Trainer,
     EarlyStoppingCallback
+)
 
 from utils import *
 
@@ -17,12 +27,25 @@ logger = logging.getLogger(__name__)
 
 
 def load_model_and_tokenizer(args):
-    if args.training_method == "ft":
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
+    model_kwargs = {}
+    if args.bit8_training:
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_8bit=True,
+        )
+    elif args.bit4_training:
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
     else:
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
-                                                     torch_dtype=torch.float16,
-                                                     trust_remote_code=True)
+        model_kwargs["torch_dtype"] = torch.float16
+
+    if args.training_method == "ft":
+        del model_kwargs["torch_dtype"]
+
+    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
     if args.adapter_path is not None:
@@ -34,16 +57,27 @@ def load_model_and_tokenizer(args):
             peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
                                      r=args.lora_r,
                                      lora_alpha=args.lora_alpha,
-                                     target_modules=LORA_TARGET_MODULES[args.model_name],
+                                     target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
                                      lora_dropout=args.lora_dropout,
-                                     bias="none")
+                                     bias="none",
+                                     inference_mode=False)
+        elif args.training_method == "ia3":
+            peft_config = IA3Config(task_type=TaskType.CAUSAL_LM,
+                                    target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
+                                    feedforward_modules=LORA_IA3_TARGET_MODULES[args.model_name]["ff_modules"],
+                                    inference_mode=False)
         elif args.training_method == "prompt-tuning":
             peft_config = PromptTuningConfig(task_type=TaskType.CAUSAL_LM,
                                              prompt_tuning_init="TEXT",
-                                             prompt_tuning_init_text="Generate one line of Python code given an "
-                                                                     "instruction",
+                                             prompt_tuning_init_text="Generate a Python code corresponding to the "
+                                                                     "natural language instruction.",
                                              num_virtual_tokens=args.num_virtual_tokens,
-                                             tokenizer_name_or_path=args.model_name_or_path)
+                                             tokenizer_name_or_path=args.model_name_or_path,
+                                             inference_mode=False)
+        elif args.training_method == "prefix-tuning":
+            peft_config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM,
+                                             num_virtual_tokens=args.num_virtual_tokens,
+                                             inference_mode=False)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
@@ -117,9 +151,9 @@ def run_train(args):
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         warmup_steps=args.num_warmup_steps,
+        optim="adamw_bnb_8bit" if args.bit8_training or args.bit4_training else "adamw_torch",
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        fp16=args.fp16,
         lr_scheduler_type=args.lr_scheduler_type,
         logging_strategy="steps",
         logging_steps=20,

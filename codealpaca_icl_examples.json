@@ -1,0 +1,12 @@
+{
+  "instruction1": "Compute the Fibonacci series up to the following number n",
+  "solution1": "def fibonacci(n): a = 0 b = 1 arr = [] arr.append(a) arr.append(b) for i in range(2,n): c = a + b a = b b = c arr.append(c) return arr",
+  "instruction2": "Create a Python class named \"Bicycle\" which has two attributes named `color` and `wheels`",
+  "solution2": "class Bicycle: def __init__(self, color, wheels): self.color = color self.wheels = wheels",
+  "instruction3": "Implement bubble sort in Python",
+  "solution3": "def bubble_sort(arr): n = len(arr) for i in range(n): for j in range(0, n-i-1): if arr[j] > arr[j+1]: arr[j], arr[j+1] = arr[j+1], arr[j]",
+  "instruction4": "Using the standard library to construct a generator that returns the first n prime numbers.",
+  "solution4": "from math import sqrt def prime_numbers(n): primes = [] i = 2 while len(primes) < n: for number in range(2, int(sqrt(i)) + 1): if i % number == 0: break else: primes.append(i) i += 1 yield from primes",
+  "instruction5": "Write a Django code to print the name of all the users in the database.",
+  "solution5": "from django.contrib.auth.models import User users = User.objects.all() for user in users: print(user.username)"
+}

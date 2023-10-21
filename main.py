@@ -28,17 +28,17 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--patience", type=int, default=2)
 
+    parser.add_argument("--bit8_training", action="store_true")
+    parser.add_argument("--bit4_training", action="store_true")
     parser.add_argument("--learning_rate", type=float,  default=5e-5)
     parser.add_argument("--lr_scheduler_type", type=str, default="linear")
     parser.add_argument("--num_warmup_steps", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0)
-    parser.add_argument("--fp16", type=bool, default=False)
 
     parser.add_argument("--max_input_length", default=64, type=int)
     parser.add_argument("--max_target_length", default=64, type=int)
 
-    parser.add_argument("--test_dataset", default="conala", type=str)
-    parser.add_argument("--temperature", default=0.8, type=float)
+    parser.add_argument("--temperature", default=1, type=float)
     parser.add_argument("--num_beams", default=10, type=int)
     parser.add_argument("--num_return_sequences", type=int, default=10)
     parser.add_argument("--do_sample", action='store_true', default=False)
@@ -69,11 +69,15 @@ if __name__ == "__main__":
 
     # Setup logging and output directories
     args.model_name = args.model_name_or_path.split('/')[-1]
-    if args.do_train:
-        if args.run_name is None:
-            args.run_name = f"{args.dataset}/{args.model_name_or_path.split('/')[-1]}_{args.training_method}"
-        args.run_dir = Path(f"{args.output_dir}/checkpoints/{args.run_name}")
-        args.run_dir.mkdir(exist_ok=True)
+    if args.run_name is None:
+        if args.do_train:
+            args.run_name = f"{args.dataset}/{args.model_name}_{args.training_method}"
+        else:
+            args.run_name = args.model_name
+    run_intermediate_path = "checkpoints" if args.do_train else "test_results"
+    args.run_dir = Path(f"{args.output_dir}/{run_intermediate_path}/{args.run_name}")
+    args.run_dir.mkdir(exist_ok=True)
+
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -91,6 +95,5 @@ if __name__ == "__main__":
         run_train(args)
 
     if args.do_test:
-        args.output_dir = args.adapter_path
         logger.info(f"[Test] Model: {args.model_name_or_path} | Dataset: {args.dataset}.")
         run_test(args)
