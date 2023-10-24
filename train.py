@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 def load_model_and_tokenizer(args):
+    """@todo: fix issues with quantization.
+
     model_kwargs = {}
     if args.bit8_training:
         model_kwargs["quantization_config"] = BitsAndBytesConfig(
@@ -44,42 +46,36 @@ def load_model_and_tokenizer(args):
 
     if args.training_method == "ft":
         del model_kwargs["torch_dtype"]
+    """
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, **model_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
+                                                 torch_dtype=torch.float16,
+                                                 trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
-    if args.adapter_path is not None:
-        # continue fine-tuning an existing PEFT checkpoint
-        model = PeftModel.from_pretrained(model, args.adapter_path, is_trainable=True).to(args.device)
-        model.print_trainable_parameters()
-    else:
-        if args.training_method == "lora":
-            peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
-                                     r=args.lora_r,
-                                     lora_alpha=args.lora_alpha,
-                                     target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
-                                     lora_dropout=args.lora_dropout,
-                                     bias="none",
-                                     inference_mode=False)
-        elif args.training_method == "ia3":
-            peft_config = IA3Config(task_type=TaskType.CAUSAL_LM,
-                                    target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
-                                    feedforward_modules=LORA_IA3_TARGET_MODULES[args.model_name]["ff_modules"],
-                                    inference_mode=False)
-        elif args.training_method == "prompt-tuning":
-            peft_config = PromptTuningConfig(task_type=TaskType.CAUSAL_LM,
-                                             prompt_tuning_init="TEXT",
-                                             prompt_tuning_init_text="Generate a Python code corresponding to the "
-                                                                     "natural language instruction.",
-                                             num_virtual_tokens=args.num_virtual_tokens,
-                                             tokenizer_name_or_path=args.model_name_or_path,
-                                             inference_mode=False)
-        elif args.training_method == "prefix-tuning":
-            peft_config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM,
-                                             num_virtual_tokens=args.num_virtual_tokens,
-                                             inference_mode=False)
-        model = get_peft_model(model, peft_config)
-        model.print_trainable_parameters()
+    if args.training_method == "lora":
+        peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
+                                 r=args.lora_r,
+                                 lora_alpha=args.lora_alpha,
+                                 target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
+                                 lora_dropout=args.lora_dropout,
+                                 bias="none")
+    elif args.training_method == "ia3":
+        peft_config = IA3Config(task_type=TaskType.CAUSAL_LM,
+                                target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
+                                feedforward_modules=LORA_IA3_TARGET_MODULES[args.model_name]["ff_modules"])
+    elif args.training_method == "prompt-tuning":
+        peft_config = PromptTuningConfig(task_type=TaskType.CAUSAL_LM,
+                                         prompt_tuning_init="TEXT",
+                                         prompt_tuning_init_text="Generate a Python code corresponding to the "
+                                                                 "natural language instruction.",
+                                         num_virtual_tokens=args.num_virtual_tokens,
+                                         tokenizer_name_or_path=args.model_name_or_path)
+    elif args.training_method == "prefix-tuning":
+        peft_config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM,
+                                         num_virtual_tokens=args.num_virtual_tokens)
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
 
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -151,7 +147,6 @@ def run_train(args):
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         warmup_steps=args.num_warmup_steps,
-        optim="adamw_bnb_8bit" if args.bit8_training or args.bit4_training else "adamw_torch",
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler_type,
@@ -159,6 +154,7 @@ def run_train(args):
         logging_steps=20,
         save_total_limit=2,
         load_best_model_at_end=True,
+        fp16=True,
         report_to=["wandb"] if args.use_wandb else ["none"]
     )
     trainer = Trainer(

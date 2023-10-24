@@ -21,7 +21,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--dataset", default="conala", type=str,
                         help="Dataset on which to fine-tune the model.")
-    parser.add_argument("--training_method", default="ft", type=str, help="Method used to fine-tuning the model.")
+    parser.add_argument("--training_method", default="ft", type=str,
+                        help="Method used to fine-tuning the model.")
 
     parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=16)
@@ -35,13 +36,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_warmup_steps", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0)
 
-    parser.add_argument("--max_input_length", default=64, type=int)
-    parser.add_argument("--max_target_length", default=64, type=int)
-
     parser.add_argument("--temperature", default=1, type=float)
     parser.add_argument("--num_beams", default=10, type=int)
     parser.add_argument("--num_return_sequences", type=int, default=10)
-    parser.add_argument("--do_sample", action='store_true', default=False)
+    parser.add_argument("--do_sample", action='store_true')
 
     parser.add_argument("--adapter_path", default=None, type=str)
 
@@ -51,7 +49,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--num_virtual_tokens", default=20, type=int)
 
-    parser.add_argument("--num_few_shot_examples", default=-1, type=int)
+    parser.add_argument("--num_icl_examples", default=-1, type=int)
 
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
@@ -89,6 +87,13 @@ if __name__ == "__main__":
         wandb.init(project=args.wandb_project_name,
                    name=args.run_name,
                    config=vars(args))
+
+    if args.dataset == "conala":
+        args.max_input_length = 64
+        args.max_target_length = 64
+    else:
+        args.max_input_length = 64
+        args.max_target_length = 128
 
     if args.do_train:
         logger.info(f"[Fine-tuning] Model: {args.model_name_or_path} | Dataset: {args.dataset}.")

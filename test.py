@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import re
 from collections import defaultdict
 
@@ -71,26 +72,27 @@ def run_test(args):
 
     model, tokenizer = load_model_and_tokenizer(args)
 
-    if args.num_few_shot_examples >= 0:
+    if args.num_icl_examples >= 0:
         # zero-shot learning
-        few_shot_prompt = "Generate Python code given the following natural language instruction."
-        if args.num_few_shot_examples > 0:
-            # in-context learning
-            icl_loading_func = globals().get(f"load_{args.dataset}_icl_examples")
-            examples = icl_loading_func()
-            for n in range(1, args.num_few_shot_examples + 1):
-                few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
-                                     \n### Response:\n{examples[f'solution{n}']}\n"
+        icl_prompt = "Generate Python code given the following natural language instruction."
+        if args.num_icl_examples > 0:
+            train_loading_func = globals().get(f"load_{args.dataset}_train_dataset")
+            train_dataset = train_loading_func()["train"]
+            random_indices = random.sample(range(len(train_dataset)), args.num_icl_examples)
+            icl_examples = train_dataset.select(random_indices)
+            for n in icl_examples:
+                icl_prompt += f"\n### Instruction:\n{n[intent_column]}\
+                                \n### Response:\n{n[code_column]}\n"
+        print(icl_prompt)
 
-    print(few_shot_prompt)
     def preprocess_function(example):
         prompt = "### Instruction:\n" + example[intent_column] + "\n### Response:\n"
-        if args.num_few_shot_examples > -1:
-            prompt = few_shot_prompt + prompt
+        if args.num_icl_examples > -1:
+            prompt = icl_prompt + prompt
         # no need to pad/truncate, we do not do batched generation
         model_inputs = tokenizer(prompt)
 
-        labels = tokenizer(example[code_column].strip())["input_ids"]
+        labels = tokenizer(example[code_column])["input_ids"]
         model_inputs["labels"] = labels
 
         return model_inputs
@@ -142,20 +144,20 @@ def run_test(args):
         })
     logger.info(f"Exporting test predictions in directory {args.run_dir}.")
     base_fname = f"output_{args.dataset}"
-    if args.num_few_shot_examples > -1:
-        base_fname += f"_{args.num_few_shot_examples}shot"
+    if args.num_icl_examples > -1:
+        base_fname += f"_{args.num_icl_examples}shot"
     with open(os.path.join(args.run_dir, f"{base_fname}.jsonl"), "w", encoding="utf-8") as fout:
         for entry in jsonl_data:
             json.dump(entry, fout)
             fout.write("\n")
 
-    # export top-1 predictions
+    # export top-1 predictions for CodeBLEU
     predictions = [p[0] for p in predictions]
-    base_pred_fname = f"predictions_{args.dataset}.txt"
-    base_ref_fname = f"references_{args.dataset}.txt"
-    if args.num_few_shot_examples > -1:
-        base_pred_fname += f"_{args.num_few_shot_examples}shot"
-        base_ref_fname += f"_{args.num_few_shot_examples}shot"
+    base_pred_fname = f"predictions_{args.dataset}"
+    base_ref_fname = f"references_{args.dataset}"
+    if args.num_icl_examples > -1:
+        base_pred_fname += f"_{args.num_icl_examples}shot"
+        base_ref_fname += f"_{args.num_icl_examples}shot"
     with open(os.path.join(args.run_dir, f"{base_pred_fname}.txt"), "w", encoding="utf-8") as fpred, \
             open(os.path.join(args.run_dir, f"{base_ref_fname}.txt"), "w", encoding="utf-8") as fref:
         for prediction, reference in zip(predictions, references):
@@ -182,7 +184,7 @@ def test_pass_at_k(args):
                                      \n### Answer:\n{examples[f'solution{n}']}\n"
 
     def preprocess_function(example):
-        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Answer:\n"
+        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Response:\n"
         if args.num_few_shot_examples >= 0:
             prompt = few_shot_prompt + prompt
         model_inputs = tokenizer(prompt)
