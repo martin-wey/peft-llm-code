@@ -65,7 +65,10 @@ if __name__ == "__main__":
     args.num_gpus = torch.cuda.device_count()
 
     # Setup logging and output directories
-    args.model_name = args.model_name_or_path.split('/')[-1]
+    if args.adapter_path is not None:
+        args.model_name = args.adapter_path.split('/')[-1]
+    else:
+        args.model_name = args.model_name_or_path.split('/')[-1]
     if args.run_name is None:
         if args.do_train:
             args.run_name = f"{args.dataset}/{args.model_name}_{args.training_method}"

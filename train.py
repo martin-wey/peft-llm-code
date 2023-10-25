@@ -1,7 +1,7 @@
 import logging
 import math
 
-import torch
+import wandb
 from peft import (
     get_peft_model,
     TaskType,
@@ -19,13 +19,33 @@ from transformers import (
     Trainer,
     Seq2SeqTrainingArguments,
     Seq2SeqTrainer,
-    EarlyStoppingCallback
+    TrainerCallback
 )
 
 from utils import *
 
-
 logger = logging.getLogger(__name__)
+
+
+class SaveBestModelCallback(TrainerCallback):
+    def __init__(self, trainer, eval_steps):
+        self.trainer = trainer
+        self.eval_steps = eval_steps
+        self.best_loss = float("inf")
+        self.saved_models_dir = []
+
+    def on_step_end(self, args, state, control, model, tokenizer, **kwargs):
+        if state.global_step % self.eval_steps == 0:
+            evaluation_results = self.trainer.evaluate()
+            eval_loss = evaluation_results["eval_loss"]
+
+            if eval_loss < self.best_loss:
+                model.save_pretrained(args.output_dir)
+                tokenizer.save_pretrained(args.output_dir)
+                self.best_loss = eval_loss
+
+                if "wandb" in args.report_to:
+                    wandb.run.summary["best_evaluation_loss"] = eval_loss
 
 
 def load_model_and_tokenizer(args):
@@ -138,10 +158,8 @@ def run_train(args):
     training_args_cls = Seq2SeqTrainingArguments if "codet5" in args.model_name_or_path else TrainingArguments
     training_args = training_args_cls(
         output_dir=args.run_dir,
-        evaluation_strategy="steps",
-        save_strategy="steps",
-        eval_steps=eval_steps,
-        save_steps=eval_steps,
+        evaluation_strategy="no",
+        save_strategy="no",
         num_train_epochs=args.num_epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
@@ -151,9 +169,8 @@ def run_train(args):
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler_type,
         logging_strategy="steps",
-        logging_steps=20,
-        save_total_limit=3,
-        load_best_model_at_end=True,
+        logging_steps=10,
+        save_total_limit=2,
         fp16=True,
         report_to=["wandb"] if args.use_wandb else ["none"]
     )
@@ -165,11 +182,8 @@ def run_train(args):
         eval_dataset=dataset["validation"],
         tokenizer=tokenizer,
         data_collator=default_data_collator,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=args.patience)]
     )
+    trainer.add_callback(SaveBestModelCallback(trainer, eval_steps))
     eval_results = trainer.evaluate()
     logger.info(f"Evaluation loss before training: {round(eval_results['eval_loss'], 4)}")
     trainer.train()
-    # save best model after training
-    trainer.model.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
-    trainer.tokenizer.save_pretrained(f"{args.run_dir}/best_model_checkpoint")
