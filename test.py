@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import \
     AutoModelForCausalLM, \
+    T5ForConditionalGeneration, \
     AutoTokenizer, \
     default_data_collator, \
     StoppingCriteriaList, \
@@ -24,25 +25,16 @@ EOF_STRINGS_CODEALPACA = ["<|endoftext|>", "</s>"]
 
 
 def load_model_and_tokenizer(args):
-    if args.training_method == "ft":
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path).to(args.device)
-    else:
-        inference_model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
-                                                               torch_dtype=torch.float16,
-                                                               trust_remote_code=True)
-        model = PeftModel.from_pretrained(inference_model, args.adapter_path).to(args.device)
+    model_cls = T5ForConditionalGeneration if "codet5" in args.model_name_or_path else AutoModelForCausalLM
+    model = model_cls.from_pretrained(args.model_name_or_path,
+                                      torch_dtype=torch.float16,
+                                      trust_remote_code=True)
+    if args.training_method != "ft":
+        model = PeftModel.from_pretrained(model, args.adapter_path).to(args.device)
         model.print_trainable_parameters()
+    else:
+        model.to(args.device)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
-
-    if getattr(tokenizer, "pad_token_id") is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-        model.config.pad_token_id = model.config.eos_token_id
-
-    if "incoder" in args.model_name:
-        tokenizer.eos_token_id = 2
-        tokenizer.pad_token_id = 1
-
-    tokenizer.padding_side = "left"
 
     return model, tokenizer
 
@@ -74,7 +66,7 @@ def run_test(args):
 
     if args.num_icl_examples >= 0:
         # zero-shot learning
-        icl_prompt = "Generate Python code given the following natural language instruction."
+        icl_prompt = "Generate Python code given a natural language instruction."
         if args.num_icl_examples > 0:
             train_loading_func = globals().get(f"load_{args.dataset}_train_dataset")
             train_dataset = train_loading_func()["train"]
@@ -86,10 +78,12 @@ def run_test(args):
         print(icl_prompt)
 
     def preprocess_function(example):
-        prompt = "### Instruction:\n" + example[intent_column] + "\n### Response:\n"
-        if args.num_icl_examples > -1:
+        prompt = "\n### Instruction:\n" + example[intent_column] + "\n### Response:\n"
+        if args.num_icl_examples >= 0:
             prompt = icl_prompt + prompt
         # no need to pad/truncate, we do not do batched generation
+        if "codet5" in args.model_name_or_path:
+            prompt += "<extra_id_0>"
         model_inputs = tokenizer(prompt)
 
         labels = tokenizer(example[code_column])["input_ids"]
@@ -121,16 +115,19 @@ def run_test(args):
                 )
             )
             generated_sequences = generated_sequences.cpu().numpy()
-            generated_new_tokens = generated_sequences[:, sample["input_ids"].shape[1]:]
+            if "codet5" not in args.model_name_or_path:
+                generated_sequences = generated_sequences[:, sample["input_ids"].shape[1]:]
 
-            for task, new_tokens in zip([step] * args.num_return_sequences, generated_new_tokens):
-                new_tokens_decoded = tokenizer.decode(new_tokens, skip_special_tokens=True,
+            for task, new_tokens in zip([step] * args.num_return_sequences, generated_sequences):
+                new_tokens_decoded = tokenizer.decode(new_tokens,
+                                                      skip_special_tokens=True,
                                                       clean_up_tokenization_spaces=True)
                 new_tokens_decoded = re.split("(%s)" % "|".join(eof_string), new_tokens_decoded.strip())[0]
                 new_tokens_decoded = new_tokens_decoded.replace("\n", " ").replace("\t", " ")
                 predictions[task].append(new_tokens_decoded)
 
-            reference_decoded = tokenizer.decode(sample["labels"][0], skip_special_tokens=True,
+            reference_decoded = tokenizer.decode(sample["labels"][0],
+                                                 skip_special_tokens=True,
                                                  clean_up_tokenization_spaces=True)
             reference_decoded = reference_decoded.replace("\n", " ").replace("\t", " ")
             references.append(reference_decoded)

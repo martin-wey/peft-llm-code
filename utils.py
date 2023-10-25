@@ -11,6 +11,10 @@ LORA_IA3_TARGET_MODULES = {
         "target_modules": ["qkv_proj"],
         "ff_modules": []
     },
+    "codet5p-220m": {
+        "target_modules": ["q", "v", "k"],
+        "ff_modules": ["wi", "wo"]
+    },
 }
 
 

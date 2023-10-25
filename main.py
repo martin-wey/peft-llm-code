@@ -24,16 +24,15 @@ if __name__ == "__main__":
     parser.add_argument("--training_method", default="ft", type=str,
                         help="Method used to fine-tuning the model.")
 
-    parser.add_argument("--num_epochs", type=int, default=10)
+    parser.add_argument("--num_epochs", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--patience", type=int, default=2)
+    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--ratio_samples_per_eval_step", type=float, default=0.2,
+                        help="The percentage of samples seen between each model evaluation step.")
 
-    parser.add_argument("--bit8_training", action="store_true")
-    parser.add_argument("--bit4_training", action="store_true")
     parser.add_argument("--learning_rate", type=float,  default=5e-5)
     parser.add_argument("--lr_scheduler_type", type=str, default="linear")
-    parser.add_argument("--num_warmup_steps", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=0)
 
     parser.add_argument("--temperature", default=1, type=float)
@@ -54,7 +53,7 @@ if __name__ == "__main__":
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
-    parser.add_argument("--wandb_project_name", default="peft-code", type=str)
+    parser.add_argument("--wandb_project_name", default="peft-llm-code", type=str)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--gpu_id", default=0, type=int)

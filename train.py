@@ -1,4 +1,5 @@
 import logging
+import math
 
 import torch
 from peft import (
@@ -7,16 +8,17 @@ from peft import (
     LoraConfig,
     IA3Config,
     PromptTuningConfig,
-    PrefixTuningConfig,
-    PeftModel
+    PrefixTuningConfig
 )
 from transformers import (
     AutoModelForCausalLM,
+    T5ForConditionalGeneration,
     AutoTokenizer,
-    BitsAndBytesConfig,
     default_data_collator,
     TrainingArguments,
     Trainer,
+    Seq2SeqTrainingArguments,
+    Seq2SeqTrainer,
     EarlyStoppingCallback
 )
 
@@ -27,55 +29,36 @@ logger = logging.getLogger(__name__)
 
 
 def load_model_and_tokenizer(args):
-    """@todo: fix issues with quantization.
+    model_cls = T5ForConditionalGeneration if "codet5" in args.model_name_or_path else AutoModelForCausalLM
+    task_type = TaskType.SEQ_2_SEQ_LM if "codet5" in args.model_name_or_path else TaskType.CAUSAL_LM
 
-    model_kwargs = {}
-    if args.bit8_training:
-        model_kwargs["quantization_config"] = BitsAndBytesConfig(
-            load_in_8bit=True,
-        )
-    elif args.bit4_training:
-        model_kwargs["quantization_config"] = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.bfloat16
-        )
-    else:
-        model_kwargs["torch_dtype"] = torch.float16
-
-    if args.training_method == "ft":
-        del model_kwargs["torch_dtype"]
-    """
-
-    model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path,
-                                                 torch_dtype=torch.float16,
-                                                 trust_remote_code=True)
+    model = model_cls.from_pretrained(args.model_name_or_path, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
     if args.training_method == "lora":
-        peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM,
+        peft_config = LoraConfig(task_type=task_type,
                                  r=args.lora_r,
                                  lora_alpha=args.lora_alpha,
                                  target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
                                  lora_dropout=args.lora_dropout,
                                  bias="none")
     elif args.training_method == "ia3":
-        peft_config = IA3Config(task_type=TaskType.CAUSAL_LM,
+        peft_config = IA3Config(task_type=task_type,
                                 target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
                                 feedforward_modules=LORA_IA3_TARGET_MODULES[args.model_name]["ff_modules"])
     elif args.training_method == "prompt-tuning":
-        peft_config = PromptTuningConfig(task_type=TaskType.CAUSAL_LM,
+        peft_config = PromptTuningConfig(task_type=task_type,
                                          prompt_tuning_init="TEXT",
-                                         prompt_tuning_init_text="Generate a Python code corresponding to the "
-                                                                 "natural language instruction.",
+                                         prompt_tuning_init_text="Generate Python code given a natural language "
+                                                                 "instruction.",
                                          num_virtual_tokens=args.num_virtual_tokens,
                                          tokenizer_name_or_path=args.model_name_or_path)
     elif args.training_method == "prefix-tuning":
-        peft_config = PrefixTuningConfig(task_type=TaskType.CAUSAL_LM,
+        peft_config = PrefixTuningConfig(task_type=task_type,
                                          num_virtual_tokens=args.num_virtual_tokens)
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
+    if args.training_method != "ft":
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
 
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -85,7 +68,8 @@ def load_model_and_tokenizer(args):
         tokenizer.eos_token_id = 2
         tokenizer.pad_token_id = 1
 
-    tokenizer.padding_side = "left"
+    if "codet5" not in args.model_name_or_path:
+        tokenizer.padding_side = "left"
 
     return model, tokenizer
 
@@ -112,8 +96,8 @@ def run_train(args):
         #   - `<eos>` delimits the snippet and allows the model to have more focused predictions at inference
         """
         tokenized_target = tokenizer(example[code_column],
-                                     truncation=True,
                                      max_length=args.max_target_length - 1,
+                                     truncation=True,
                                      # incoder adds eos token before the start of a sequence -> ignore
                                      add_special_tokens=False)
         tokenized_target["input_ids"] = tokenized_target["input_ids"] + [tokenizer.eos_token_id]
@@ -122,10 +106,7 @@ def run_train(args):
         prompt = "### Instruction:\n" + example[intent_column] + "\n### Response:\n"
         max_prompt_len = (args.max_input_length + args.max_target_length) - \
                          len(tokenized_target["input_ids"])
-        model_inputs = tokenizer(prompt,
-                                 truncation=True,
-                                 padding="max_length",
-                                 max_length=max_prompt_len)
+        model_inputs = tokenizer(prompt, max_length=max_prompt_len,  padding="max_length", truncation=True)
 
         model_inputs["labels"] = [-100] * len(model_inputs["input_ids"]) + tokenized_target["input_ids"]
         model_inputs["input_ids"] = model_inputs["input_ids"] + tokenized_target["input_ids"]
@@ -133,31 +114,51 @@ def run_train(args):
 
         return model_inputs
 
-    dataset = dataset.map(preprocess_function,
+    def preprocess_function_seq2seq(example):
+        prompt = "Generate Python code: ### Instruction:\n" + example[intent_column] + "\n### Response:\n"
+        model_inputs = tokenizer(prompt, max_length=args.max_input_length, padding="max_length", truncation=True)
+        labels = tokenizer(example[code_column], max_length=args.max_target_length, padding="max_length", truncation=True)
+
+        labels["input_ids"] = [l if l != tokenizer.pad_token_id else -100 for l in labels["input_ids"]]
+        model_inputs["labels"] = labels["input_ids"]
+
+        return model_inputs
+
+    tokenize_fn = preprocess_function_seq2seq if "codet5" in args.model_name_or_path else preprocess_function
+    dataset = dataset.map(tokenize_fn,
                           num_proc=args.num_workers,
                           remove_columns=dataset["train"].column_names,
                           desc="Generating samples features.")
 
-    training_args = TrainingArguments(
+    n_samples = len(dataset["train"])
+    n_samples_per_step = args.batch_size * args.num_gpus * args.gradient_accumulation_steps
+    eval_steps = math.ceil((n_samples // n_samples_per_step) * args.ratio_samples_per_eval_step)
+    num_warmup_steps = 2 * eval_steps
+
+    training_args_cls = Seq2SeqTrainingArguments if "codet5" in args.model_name_or_path else TrainingArguments
+    training_args = training_args_cls(
         output_dir=args.run_dir,
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
+        evaluation_strategy="steps",
+        save_strategy="steps",
+        eval_steps=eval_steps,
+        save_steps=eval_steps,
         num_train_epochs=args.num_epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        warmup_steps=args.num_warmup_steps,
+        warmup_steps=num_warmup_steps,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler_type,
         logging_strategy="steps",
         logging_steps=20,
-        save_total_limit=2,
+        save_total_limit=3,
         load_best_model_at_end=True,
         fp16=True,
         report_to=["wandb"] if args.use_wandb else ["none"]
     )
-    trainer = Trainer(
+    trainer_cls = Seq2SeqTrainer if "codet5" in args.model_name_or_path else Trainer
+    trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=dataset["train"],

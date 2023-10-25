@@ -8,7 +8,7 @@ model_name=$(echo "$model" | rev | cut -d'/' -f1 | rev)
 dataset=$2
 gpu_id=$3
 
-run_name="${model_name}_icl_n0"
+run_name="${model_name}_zero_shot"
 echo "inference - ${run_name}"
 CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
   --model_name_or_path $model \
@@ -19,7 +19,7 @@ CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
 
 for n in "${n_examples[@]}"; do
   for seed in "${seeds[@]}"; do
-    run_name="${model_name}_icl_n${n}_seed${seed}"
+    run_name="${model_name}_icl_seed${seed}"
     echo "inference - ${run_name}"
     CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
       --model_name_or_path $model \
