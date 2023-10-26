@@ -3,15 +3,15 @@ import json
 from datasets import load_dataset
 
 LORA_IA3_TARGET_MODULES = {
-    "codegen2-1B": {
+    "codegen-350M-mono": {
         "target_modules": ["qkv_proj"],
-        "ff_modules": ["out_proj", "fc_in", "fc_out"]
-    },
-    "codegen2-3_7B": {
-        "target_modules": ["qkv_proj"],
-        "ff_modules": []
+        "ff_modules": ["fc_in", "fc_out"]
     },
     "codet5p-220m": {
+        "target_modules": ["q", "v", "k"],
+        "ff_modules": ["wi", "wo"]
+    },
+    "codet5p-770m": {
         "target_modules": ["q", "v", "k"],
         "ff_modules": ["wi", "wo"]
     },
