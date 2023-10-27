@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pefts_lrs=("lora,3e-4" "ia3,3e-4" "prompt-tuning,3e-3" "prefix-tuning,3e-3")
+pefts_lrs=("lora,3e-4" "ia3,3e-3" "prompt-tuning,3e-3" "prefix-tuning,3e-2")
 
 model=$1
 model_name=$(echo "$model" | rev | cut -d'/' -f1 | rev)

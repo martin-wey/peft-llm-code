@@ -24,10 +24,9 @@ if __name__ == "__main__":
     parser.add_argument("--training_method", default="ft", type=str,
                         help="Method used to fine-tuning the model.")
 
-    parser.add_argument("--num_epochs", type=int, default=5)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--num_epochs", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--patience", type=int, default=3)
     parser.add_argument("--ratio_samples_per_eval_step", type=float, default=0.2,
                         help="The percentage of samples seen between each model evaluation step.")
 
@@ -56,7 +55,6 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_project_name", default="peft-llm-code", type=str)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--device", default="cuda", type=str)
-    parser.add_argument("--gpu_id", default=0, type=int)
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()

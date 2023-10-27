@@ -164,13 +164,13 @@ def run_train(args):
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        warmup_steps=num_warmup_steps,
+        warmup_ratio=0.05,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler_type,
+        optim="adafactor",
         logging_strategy="steps",
         logging_steps=10,
-        save_total_limit=2,
         fp16=True,
         report_to=["wandb"] if args.use_wandb else ["none"]
     )
