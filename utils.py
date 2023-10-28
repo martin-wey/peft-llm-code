@@ -15,6 +15,14 @@ LORA_IA3_TARGET_MODULES = {
         "target_modules": ["q", "v", "k"],
         "ff_modules": ["wi", "wo"]
     },
+    "codegen2-1B": {
+        "target_modules": ["qkv_proj"],
+        "ff_modules": ["fc_in", "fc_out"]
+    },
+    "codegen2-3_7B": {
+        "target_modules": ["qkv_proj"],
+        "ff_modules": ["fc_in", "fc_out"]
+    },
 }
 
 

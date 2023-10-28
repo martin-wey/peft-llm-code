@@ -8,14 +8,12 @@ dataset=$2
 gpu_id=$3
 
 for peft in "${pefts[@]}"; do
-  peft="${values[0]}"
-  lr=${values[1]}
-
+  adapter_path="runs/checkpoints/${dataset}/${model_name}_${peft}"
   echo "${model_name} - ${peft} - ${dataset}"
   CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
   --model_name_or_path $model \
-  --run_name $run_name \
+  --adapter_path $adapter_path \
+  --training_method $peft \
   --dataset $dataset \
-  --num_icl_examples 0 \
   --do_test
 done
