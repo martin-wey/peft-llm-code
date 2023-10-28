@@ -108,11 +108,9 @@ def run_test(args):
         with torch.no_grad():
             generated_sequences = model.generate(
                 input_ids=sample["input_ids"].to(args.device),
-                num_beams=args.num_beams,
-                temperature=args.temperature,
+                num_beams=10,
+                num_return_sequences=10,
                 max_new_tokens=args.max_target_length,
-                num_return_sequences=args.num_return_sequences,
-                do_sample=args.do_sample,
                 stopping_criteria=StoppingCriteriaList(
                     [EndOfFunctionCriteria(sample["input_ids"].shape[1], eof_string, tokenizer)]
                 )

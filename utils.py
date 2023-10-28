@@ -4,27 +4,33 @@ from datasets import load_dataset
 
 LORA_IA3_TARGET_MODULES = {
     "codegen-350M-mono": {
-        "target_modules": ["qkv_proj"],
+        "target_modules_lora": ["qkv_proj"],
+        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
         "ff_modules": ["fc_in", "fc_out"]
     },
     "codet5p-220m": {
-        "target_modules": ["q", "v", "k"],
+        "target_modules_lora": ["q", "v", "k"],
+        "target_modules_ia3": ["q", "v", "k", "wi", "wo"],
         "ff_modules": ["wi", "wo"]
     },
     "codet5p-770m": {
-        "target_modules": ["q", "v", "k"],
+        "target_modules_lora": ["q", "v", "k"],
+        "target_modules_ia3": ["q", "v", "k", "wi", "wo"],
         "ff_modules": ["wi", "wo"]
     },
     "codegen2-1B": {
-        "target_modules": ["qkv_proj"],
+        "target_modules_lora": ["qkv_proj"],
+        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
         "ff_modules": ["fc_in", "fc_out"]
     },
     "codegen2-3_7B": {
-        "target_modules": ["qkv_proj"],
+        "target_modules_lora": ["qkv_proj"],
+        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
         "ff_modules": ["fc_in", "fc_out"]
     },
     "CodeLlama-7b-hf": {
-        "target_modules": ["q_proj", "k_proj", "v_proj"],
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]
     },
 }

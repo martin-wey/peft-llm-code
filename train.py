@@ -56,7 +56,6 @@ def load_model_and_tokenizer(args):
     model = model_cls.from_pretrained(args.model_name_or_path,
                                       torch_dtype=torch.float16,
                                       low_cpu_mem_usage=True,
-                                      device_map="auto",
                                       trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
@@ -64,36 +63,31 @@ def load_model_and_tokenizer(args):
         peft_config = LoraConfig(task_type=task_type,
                                  r=args.lora_r,
                                  lora_alpha=args.lora_alpha,
-                                 target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
+                                 target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules_lora"],
                                  lora_dropout=args.lora_dropout,
                                  bias="none")
     elif args.training_method == "ia3":
         peft_config = IA3Config(task_type=task_type,
-                                target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules"],
+                                target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules_ia3"],
                                 feedforward_modules=LORA_IA3_TARGET_MODULES[args.model_name]["ff_modules"])
     elif args.training_method == "prompt-tuning":
         peft_config = PromptTuningConfig(task_type=task_type,
+                                         num_virtual_tokens=args.prompt_num_virtual_tokens,
                                          prompt_tuning_init="TEXT",
                                          prompt_tuning_init_text="Generate Python code given a natural language "
                                                                  "instruction.",
-                                         num_virtual_tokens=args.num_virtual_tokens,
                                          tokenizer_name_or_path=args.model_name_or_path)
     elif args.training_method == "prefix-tuning":
         peft_config = PrefixTuningConfig(task_type=task_type,
-                                         num_virtual_tokens=args.num_virtual_tokens)
-    model.config.use_cache = False
+                                         num_virtual_tokens=args.prefix_num_virtual_tokens)
+
     if args.training_method != "ft":
-        model.enable_input_require_grads()
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
-
-    if "incoder" in args.model_name:
-        tokenizer.eos_token_id = 2
-        tokenizer.pad_token_id = 1
 
     if "codet5" not in args.model_name_or_path:
         tokenizer.padding_side = "left"
@@ -160,7 +154,6 @@ def run_train(args):
     n_samples = len(dataset["train"])
     n_samples_per_step = args.batch_size * args.num_gpus * args.gradient_accumulation_steps
     eval_steps = math.ceil((n_samples // n_samples_per_step) * args.ratio_samples_per_eval_step)
-    num_warmup_steps = 2 * eval_steps
 
     training_args_cls = Seq2SeqTrainingArguments if "codet5" in args.model_name_or_path else TrainingArguments
     training_args = training_args_cls(
@@ -175,7 +168,6 @@ def run_train(args):
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler_type,
-        gradient_checkpointing=True,
         optim="adafactor",
         logging_strategy="steps",
         logging_steps=10,

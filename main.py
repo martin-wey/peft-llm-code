@@ -24,7 +24,7 @@ if __name__ == "__main__":
     parser.add_argument("--training_method", default="ft", type=str,
                         help="Method used to fine-tuning the model.")
 
-    parser.add_argument("--num_epochs", type=int, default=10)
+    parser.add_argument("--num_epochs", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--ratio_samples_per_eval_step", type=float, default=0.2,
@@ -45,7 +45,8 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", default=32, type=int)
     parser.add_argument("--lora_dropout", default=0.05, type=float)
 
-    parser.add_argument("--num_virtual_tokens", default=20, type=int)
+    parser.add_argument("--prompt_num_virtual_tokens", default=20, type=int)
+    parser.add_argument("--prefix_num_virtual_tokens", default=10, type=int)
 
     parser.add_argument("--num_icl_examples", default=-1, type=int)
 
