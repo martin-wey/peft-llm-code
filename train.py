@@ -56,7 +56,7 @@ def load_model_and_tokenizer(args):
     model = model_cls.from_pretrained(args.model_name_or_path,
                                       torch_dtype=torch.float16,
                                       low_cpu_mem_usage=True,
-                                      device_map={"": 0},
+                                      device_map="auto",
                                       trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
@@ -81,7 +81,9 @@ def load_model_and_tokenizer(args):
     elif args.training_method == "prefix-tuning":
         peft_config = PrefixTuningConfig(task_type=task_type,
                                          num_virtual_tokens=args.num_virtual_tokens)
+    model.config.use_cache = False
     if args.training_method != "ft":
+        model.enable_input_require_grads()
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 
@@ -173,6 +175,7 @@ def run_train(args):
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler_type,
+        gradient_checkpointing=True,
         optim="adafactor",
         logging_strategy="steps",
         logging_steps=10,

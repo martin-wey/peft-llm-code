@@ -26,7 +26,12 @@ EOF_STRINGS_CODEALPACA = ["<|endoftext|>", "</s>"]
 
 def load_model_and_tokenizer(args):
     model_cls = T5ForConditionalGeneration if "codet5" in args.model_name_or_path else AutoModelForCausalLM
-    model = model_cls.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+    model = model_cls.from_pretrained(args.model_name_or_path,
+                                      torch_dtype=torch.float16,
+                                      low_cpu_mem_usage=True,
+                                      device_map="auto",
+                                      trust_remote_code=True)
+    model.config.use_cache = True
     if args.training_method != "ft":
         model = PeftModel.from_pretrained(model, args.adapter_path).to(args.device)
         model.print_trainable_parameters()

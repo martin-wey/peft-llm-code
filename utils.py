@@ -23,6 +23,10 @@ LORA_IA3_TARGET_MODULES = {
         "target_modules": ["qkv_proj"],
         "ff_modules": ["fc_in", "fc_out"]
     },
+    "CodeLlama-7b-hf": {
+        "target_modules": ["q_proj", "k_proj", "v_proj"],
+        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
+    },
 }
 
 
