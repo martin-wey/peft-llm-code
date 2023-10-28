@@ -53,10 +53,14 @@ def load_model_and_tokenizer(args):
     model_cls = T5ForConditionalGeneration if "codet5" in args.model_name_or_path else AutoModelForCausalLM
     task_type = TaskType.SEQ_2_SEQ_LM if "codet5" in args.model_name_or_path else TaskType.CAUSAL_LM
 
-    model = model_cls.from_pretrained(args.model_name_or_path,
-                                      torch_dtype=torch.float16,
-                                      low_cpu_mem_usage=True,
-                                      trust_remote_code=True)
+    model_kwargs = {
+        "low_cpu_mem_usage": True,
+        "trust_remote_code": True
+    }
+    if args.training_method != "ft":
+        model_kwargs["torch_dtype"] = torch.float16
+
+    model = model_cls.from_pretrained(args.model_name_or_path, **model_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
     if args.training_method == "lora":
