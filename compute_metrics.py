@@ -1,7 +1,9 @@
-import argparse
+import csv
 import json
+import os
+import subprocess
 
-from utils import load_conala_test_dataset
+from tqdm import tqdm
 
 
 def compute_exact_match(predictions, references, k):
@@ -9,7 +11,7 @@ def compute_exact_match(predictions, references, k):
     total = len(predictions)
 
     for i in range(total):
-        prediction = predictions[i][:k]  # Get the top-k predictions
+        prediction = predictions[i][:k]
         reference = references[i]
 
         if reference in prediction:
@@ -19,55 +21,68 @@ def compute_exact_match(predictions, references, k):
     return accuracy
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--output_file", "-ref", help="Jsonl file containing the predictions and references.")
-    args = parser.parse_args()
-
-    test_dataset = load_conala_test_dataset()
-
+def get_em_metrics(output_fp):
     predictions = []
     references = []
-    with open(args.output_file, "r", encoding="utf-8") as file:
+    with open(output_fp, "r", encoding="utf-8") as file:
         for line in file:
             json_data = json.loads(line)
             predictions.append(json_data["predictions"])
             references.append(json_data["references"])
 
-    em_at_1 = round(compute_exact_match(predictions, references, 1) * 100, 2)
-    em_at_2 = round(compute_exact_match(predictions, references, 2) * 100, 2)
-    em_at_5 = round(compute_exact_match(predictions, references, 5) * 100, 2)
-    em_at_10 = round(compute_exact_match(predictions, references, 10) * 100, 2)
+    em_1 = round(compute_exact_match(predictions, references, 1) * 100, 3)
+    em_2 = round(compute_exact_match(predictions, references, 2) * 100, 3)
+    em_5 = round(compute_exact_match(predictions, references, 5) * 100, 3)
+    em_10 = round(compute_exact_match(predictions, references, 10) * 100, 3)
 
-    print(f"EM@1: {em_at_1} | EM@2: {em_at_2} | EM@5: {em_at_5} | EM@10: {em_at_10}")
+    return em_1, em_2, em_5, em_10
 
-    lib_samples = {}
-    for preds, refs, sample in zip(predictions, references, test_dataset):
-        if sample["oracle_man"] is []:
-            lib_samples["None"] += 1
-        else:
-            for lib in sample["oracle_man"]:
-                if "python" in lib:
-                    lib_name = lib.split("#")[0]
-                else:
-                    lib_name = lib.split(".")[0]
 
-                if lib_name not in lib_samples:
-                    lib_samples[lib_name] = {"predictions": [], "references": [], "n": 0}
-                lib_samples[lib_name]["predictions"].append(preds)
-                lib_samples[lib_name]["references"].append(refs)
-                lib_samples[lib_name]["n"] += 1
-
-    # top-10 interfaces/libraries
-    lib_samples_filtered = dict(sorted(lib_samples.items(), key=lambda x: x[1]["n"], reverse=True)[:10])
-    for lib, lib_data in lib_samples_filtered.items():
-        print(lib)
-        em_at_1 = round(compute_exact_match(lib_data["predictions"], lib_data["references"], 1) * 100, 2)
-        em_at_2 = round(compute_exact_match(lib_data["predictions"], lib_data["references"], 2) * 100, 2)
-        em_at_5 = round(compute_exact_match(lib_data["predictions"], lib_data["references"], 5) * 100, 2)
-        em_at_10 = round(compute_exact_match(lib_data["predictions"], lib_data["references"], 10) * 100, 2)
-        print(f"EM@1: {em_at_1} | EM@2: {em_at_2} | EM@5: {em_at_5} | EM@10: {em_at_10}")
+def get_codebleu(predictions_fp, references_fp):
+    os.chdir("evaluator/CodeBLEU")
+    res = subprocess.run(["python", "calc_code_bleu.py", "--refs", references_fp, "--hyp", predictions_fp, "--lang", "python"], stdout=subprocess.PIPE)
+    codebleu = float(res.stdout.decode("utf-8").strip())
+    os.chdir("../../")
+    return codebleu
 
 
 if __name__ == "__main__":
-    main()
+    methods = ["ft", "lora", "ia3", "prompt-tuning", "prefix-tuning"]
+    datasets = ["conala", "codealpaca"]
+    max_num_icl_examples = 5
+    results_dir = "data"
+
+    with open(f"{results_dir}/data_metrics.csv", "w", newline="") as fout:
+        writer = csv.writer(fout)
+        writer.writerow(["model", "dataset", "method", "em_1", "em_2", "em_5", "em_10", "codebleu", "seed"])
+        for run_dir in tqdm(os.listdir(results_dir)):
+            if "icl" in run_dir:
+                for n in range(1, max_num_icl_examples + 1):
+                    for dataset in datasets:
+                        # EM metrics
+                        output_fp = f"{results_dir}/{run_dir}/output_{dataset}_{n}shot.jsonl"
+                        em_1, em_2, em_5, em_10 = get_em_metrics(output_fp)
+
+                        # CodeBLEU
+                        predictions_fp = f"../../{results_dir}/{run_dir}/predictions_{dataset}_{n}shot.txt"
+                        references_fp = f"../../{results_dir}/{run_dir}/references_{dataset}_{n}shot.txt"
+                        codebleu = get_codebleu(predictions_fp, references_fp)
+
+                        run_dir_splitted = run_dir.split("_icl")
+                        model = run_dir_splitted[0]
+                        method = f"icl_{n}"
+                        seed = int(run_dir_splitted[1].split("_seed")[1])
+                        writer.writerow([model, dataset, method, em_1, em_2, em_5, em_10, codebleu, seed])
+            else:
+                for dataset in datasets:
+                    output_fp = f"{results_dir}/{run_dir}/output_{dataset}.jsonl"
+                    em_1, em_2, em_5, em_10 = get_em_metrics(output_fp)
+
+                    predictions_fp = f"../../{results_dir}/{run_dir}/predictions_{dataset}.txt"
+                    references_fp = f"../../{results_dir}/{run_dir}/references_{dataset}.txt"
+                    codebleu = get_codebleu(predictions_fp, references_fp)
+
+                    method = next((m for m in methods if m in run_dir), None)
+                    model = run_dir.split(f"_{method}")[0]
+                    seed = 42
+                    writer.writerow([model, dataset, method, em_1, em_2, em_5, em_10, codebleu, seed])

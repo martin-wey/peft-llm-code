@@ -26,10 +26,7 @@ EOF_STRINGS_CODEALPACA = ["<|endoftext|>", "</s>"]
 
 def load_model_and_tokenizer(args):
     model_cls = T5ForConditionalGeneration if "codet5" in args.model_name_or_path else AutoModelForCausalLM
-    model_kwargs = {
-        "low_cpu_mem_usage": True,
-        "trust_remote_code": True
-    }
+    model_kwargs = {"trust_remote_code": True}
     if args.training_method != "ft":
         model_kwargs["torch_dtype"] = torch.float16
 
