@@ -15,7 +15,7 @@ from transformers import \
     AutoTokenizer, \
     default_data_collator, \
     StoppingCriteriaList, \
-    StoppingCriteria
+    StoppingCriteria, BitsAndBytesConfig
 
 from utils import *
 
@@ -29,6 +29,16 @@ def load_model_and_tokenizer(args):
     model_kwargs = {"trust_remote_code": True}
     if args.tuning_method != "ft":
         model_kwargs["torch_dtype"] = torch.float16
+
+    if args.tuning_method == "qlora-8bit":
+        qconfig = BitsAndBytesConfig(load_in_8bit=True)
+        model_kwargs["quantization_config"] = qconfig
+    elif args.tuning_method == "qlora-4bit":
+        qconfig = BitsAndBytesConfig(load_in_4bit=True,
+                                     bnb_4bit_quant_type="nf4",
+                                     bnb_4bit_use_double_quant=True,
+                                     bnb_4bit_compute_dtype=torch.float16)
+        model_kwargs["quantization_config"] = qconfig
 
     model = model_cls.from_pretrained(args.model_name_or_path, **model_kwargs)
     model.config.use_cache = True
