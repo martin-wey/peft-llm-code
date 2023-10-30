@@ -13,7 +13,7 @@ for peft in "${pefts[@]}"; do
   CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
   --model_name_or_path $model \
   --adapter_path $adapter_path \
-  --training_method $peft \
+  --tuning_method $peft \
   --dataset $dataset \
   --do_test
 done

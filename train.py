@@ -13,14 +13,14 @@ from peft import (
 )
 from transformers import (
     AutoModelForCausalLM,
-    T5ForConditionalGeneration,
+    AutoModelForSeq2SeqLM,
     AutoTokenizer,
     default_data_collator,
     TrainingArguments,
     Trainer,
     Seq2SeqTrainingArguments,
     Seq2SeqTrainer,
-    TrainerCallback
+    TrainerCallback, BitsAndBytesConfig
 )
 
 from utils import *
@@ -50,42 +50,52 @@ class SaveBestModelCallback(TrainerCallback):
 
 
 def load_model_and_tokenizer(args):
-    model_cls = T5ForConditionalGeneration if "codet5" in args.model_name_or_path else AutoModelForCausalLM
+    model_cls = AutoModelForSeq2SeqLM if "codet5" in args.model_name_or_path else AutoModelForCausalLM
     task_type = TaskType.SEQ_2_SEQ_LM if "codet5" in args.model_name_or_path else TaskType.CAUSAL_LM
 
     model_kwargs = {
         "low_cpu_mem_usage": True,
         "trust_remote_code": True
     }
-    if args.training_method != "ft":
+    if args.tuning_method != "ft":
         model_kwargs["torch_dtype"] = torch.float16
 
-    model = model_cls.from_pretrained(args.model_name_or_path, **model_kwargs)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    if args.tuning_method == "qlora-8bit":
+        qconfig = BitsAndBytesConfig(load_in_8bit=True)
+        model_kwargs["quantization_config"] = qconfig
+    elif args.tuning_method == "qlora-4bit":
+        qconfig = BitsAndBytesConfig(load_in_4bit=True,
+                                     bnb_4bit_quant_type="nf4",
+                                     bnb_4bit_use_double_quant=True,
+                                     bnb_4bit_compute_dtype=torch.float16)
+        model_kwargs["quantization_config"] = qconfig
 
-    if args.training_method == "lora":
+    model = model_cls.from_pretrained(args.model_name_or_path, **model_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+
+    if args.tuning_method in ["lora", "qlora-8bit", "qlora-4bit"]:
         peft_config = LoraConfig(task_type=task_type,
                                  r=args.lora_r,
                                  lora_alpha=args.lora_alpha,
                                  target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules_lora"],
                                  lora_dropout=args.lora_dropout,
                                  bias="none")
-    elif args.training_method == "ia3":
+    elif args.tuning_method == "ia3":
         peft_config = IA3Config(task_type=task_type,
                                 target_modules=LORA_IA3_TARGET_MODULES[args.model_name]["target_modules_ia3"],
                                 feedforward_modules=LORA_IA3_TARGET_MODULES[args.model_name]["ff_modules"])
-    elif args.training_method == "prompt-tuning":
+    elif args.tuning_method == "prompt-tuning":
         peft_config = PromptTuningConfig(task_type=task_type,
                                          num_virtual_tokens=args.prompt_num_virtual_tokens,
                                          prompt_tuning_init="TEXT",
                                          prompt_tuning_init_text="Generate Python code given a natural language "
                                                                  "instruction.",
                                          tokenizer_name_or_path=args.model_name_or_path)
-    elif args.training_method == "prefix-tuning":
+    elif args.tuning_method == "prefix-tuning":
         peft_config = PrefixTuningConfig(task_type=task_type,
                                          num_virtual_tokens=args.prefix_num_virtual_tokens)
 
-    if args.training_method != "ft":
+    if args.tuning_method != "ft":
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
 

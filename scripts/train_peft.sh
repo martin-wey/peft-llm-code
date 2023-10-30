@@ -18,7 +18,7 @@ for tuple in "${pefts_lrs[@]}"; do
   CUDA_VISIBLE_DEVICES=$gpu_id python main.py \
     --model_name_or_path $model \
     --dataset $dataset \
-    --training_method $peft \
+    --tuning_method $peft \
     --learning_rate $lr \
     --batch_size $batch_size \
     --gradient_accumulation_steps $gradient_accumulation_steps \

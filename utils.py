@@ -18,6 +18,16 @@ LORA_IA3_TARGET_MODULES = {
         "target_modules_ia3": ["q", "v", "k", "wi", "wo"],
         "ff_modules": ["wi", "wo"]
     },
+    "codet5p-2b": {
+        "target_modules_lora": ["qkv_proj"],
+        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
+        "ff_modules": ["fc_in", "fc_out"]
+    },
+    "codet5p-6b": {
+        "target_modules_lora": ["qkv_proj"],
+        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
+        "ff_modules": ["fc_in", "fc_out"]
+    },
     "codegen2-1B": {
         "target_modules_lora": ["qkv_proj"],
         "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
@@ -28,7 +38,27 @@ LORA_IA3_TARGET_MODULES = {
         "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
         "ff_modules": ["fc_in", "fc_out"]
     },
+    "codegen2-7B": {
+        "target_modules_lora": ["qkv_proj"],
+        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
+        "ff_modules": ["fc_in", "fc_out"]
+    },
     "CodeLlama-7b-hf": {
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
+    },
+    "CodeLlama-7b-Instruct-hf": {
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
+    },
+    "CodeLlama-7b-Python-hf": {
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
+    },
+    "CodeLlama-13b-Python-hf": {
         "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
         "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]

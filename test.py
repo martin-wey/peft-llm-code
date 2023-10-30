@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import \
     AutoModelForCausalLM, \
-    T5ForConditionalGeneration, \
+    AutoModelForSeq2SeqLM, \
     AutoTokenizer, \
     default_data_collator, \
     StoppingCriteriaList, \
@@ -25,19 +25,19 @@ EOF_STRINGS_CODEALPACA = ["<|endoftext|>", "</s>"]
 
 
 def load_model_and_tokenizer(args):
-    model_cls = T5ForConditionalGeneration if "codet5" in args.model_name_or_path else AutoModelForCausalLM
+    model_cls = AutoModelForSeq2SeqLM if "codet5" in args.model_name_or_path else AutoModelForCausalLM
     model_kwargs = {"trust_remote_code": True}
-    if args.training_method != "ft":
+    if args.tuning_method != "ft":
         model_kwargs["torch_dtype"] = torch.float16
 
     model = model_cls.from_pretrained(args.model_name_or_path, **model_kwargs)
     model.config.use_cache = True
-    if args.training_method != "ft":
+    if args.tuning_method != "ft":
         model = PeftModel.from_pretrained(model, args.adapter_path).to(args.device)
         model.print_trainable_parameters()
     else:
         model.to(args.device)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
 
     return model, tokenizer
 

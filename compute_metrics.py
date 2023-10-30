@@ -50,13 +50,16 @@ if __name__ == "__main__":
     methods = ["ft", "lora", "ia3", "prompt-tuning", "prefix-tuning"]
     datasets = ["conala", "codealpaca"]
     max_num_icl_examples = 5
-    results_dir = "data"
+    results_dir = "runs/test_results"
 
     with open(f"{results_dir}/data_metrics.csv", "w", newline="") as fout:
         writer = csv.writer(fout)
         writer.writerow(["model", "dataset", "method", "em_1", "em_2", "em_5", "em_10", "codebleu", "seed"])
         for run_dir in tqdm(os.listdir(results_dir)):
+            if not os.path.isdir(f"{results_dir}/{run_dir}"):
+                continue
             if "icl" in run_dir:
+                continue
                 for n in range(1, max_num_icl_examples + 1):
                     for dataset in datasets:
                         # EM metrics
@@ -76,6 +79,8 @@ if __name__ == "__main__":
             else:
                 for dataset in datasets:
                     output_fp = f"{results_dir}/{run_dir}/output_{dataset}.jsonl"
+                    if not os.path.exists(output_fp):
+                        continue
                     em_1, em_2, em_5, em_10 = get_em_metrics(output_fp)
 
                     predictions_fp = f"../../{results_dir}/{run_dir}/predictions_{dataset}.txt"

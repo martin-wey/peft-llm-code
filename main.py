@@ -21,7 +21,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--dataset", default="conala", type=str,
                         help="Dataset on which to fine-tune the model.")
-    parser.add_argument("--training_method", default="ft", type=str,
+    parser.add_argument("--tuning_method", default="ft", type=str,
                         help="Method used to fine-tuning the model.")
 
     parser.add_argument("--num_epochs", type=int, default=5)
@@ -70,7 +70,7 @@ if __name__ == "__main__":
         args.model_name = args.model_name_or_path.split('/')[-1]
     if args.run_name is None:
         if args.do_train:
-            args.run_name = f"{args.dataset}/{args.model_name}_{args.training_method}"
+            args.run_name = f"{args.dataset}/{args.model_name}_{args.tuning_method}"
         else:
             args.run_name = args.model_name
     run_intermediate_path = "checkpoints" if args.do_train else "test_results"
