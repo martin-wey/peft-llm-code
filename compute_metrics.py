@@ -40,16 +40,18 @@ def get_em_metrics(output_fp):
 
 def get_codebleu(predictions_fp, references_fp):
     os.chdir("evaluator/CodeBLEU")
-    res = subprocess.run(["python", "calc_code_bleu.py", "--refs", references_fp, "--hyp", predictions_fp, "--lang", "python"], stdout=subprocess.PIPE)
+    res = subprocess.run(
+        ["python", "calc_code_bleu.py", "--refs", references_fp, "--hyp", predictions_fp, "--lang", "python"],
+        stdout=subprocess.PIPE)
     codebleu = float(res.stdout.decode("utf-8").strip())
     os.chdir("../../")
     return codebleu
 
 
 if __name__ == "__main__":
-    methods = ["ft", "lora", "ia3", "prompt-tuning", "prefix-tuning"]
+    methods = ["joint", "qlora-8bit", "qlora-4bit", "ft", "lora", "ia3", "prompt-tuning", "prefix-tuning"]
     datasets = ["conala", "codealpaca"]
-    max_num_icl_examples = 5
+    max_num_icl_examples = 3
     results_dir = "runs/test_results"
 
     with open(f"{results_dir}/data_metrics.csv", "w", newline="") as fout:
@@ -59,11 +61,12 @@ if __name__ == "__main__":
             if not os.path.isdir(f"{results_dir}/{run_dir}"):
                 continue
             if "icl" in run_dir:
-                continue
                 for n in range(1, max_num_icl_examples + 1):
                     for dataset in datasets:
                         # EM metrics
                         output_fp = f"{results_dir}/{run_dir}/output_{dataset}_{n}shot.jsonl"
+                        if not os.path.exists(output_fp):
+                            continue
                         em_1, em_2, em_5, em_10 = get_em_metrics(output_fp)
 
                         # CodeBLEU

@@ -2,9 +2,7 @@ import logging
 import os
 import random
 import re
-from collections import defaultdict
 
-import evaluate
 import torch
 from peft import PeftModel
 from torch.utils.data import DataLoader
@@ -27,7 +25,8 @@ EOF_STRINGS_CODEALPACA = ["<|endoftext|>", "</s>"]
 def load_model_and_tokenizer(args):
     model_cls = AutoModelForSeq2SeqLM if "codet5" in args.model_name_or_path else AutoModelForCausalLM
     model_kwargs = {"trust_remote_code": True}
-    if args.tuning_method != "ft":
+
+    if args.tuning_method != "ft" or args.num_icl_examples > -1:
         model_kwargs["torch_dtype"] = torch.float16
 
     if args.tuning_method == "qlora-8bit":
@@ -47,7 +46,12 @@ def load_model_and_tokenizer(args):
         model.print_trainable_parameters()
     else:
         model.to(args.device)
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+
+    if getattr(tokenizer, "pad_token_id") is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        model.config.pad_token_id = model.config.eos_token_id
 
     return model, tokenizer
 
@@ -125,7 +129,7 @@ def run_test(args):
                     [EndOfFunctionCriteria(sample["input_ids"].shape[1], eof_string, tokenizer)]
                 )
             )
-            generated_sequences = generated_sequences.cpu().numpy()
+            generated_sequences = generated_sequences.detach().cpu().numpy()
             if "codet5" not in args.model_name_or_path:
                 generated_sequences = generated_sequences[:, sample["input_ids"].shape[1]:]
 
@@ -171,91 +175,3 @@ def run_test(args):
         for prediction, reference in zip(predictions, references):
             fpred.write(prediction + "\n")
             fref.write(reference + "\n")
-
-'''
-def test_pass_at_k(args):
-    os.environ["HF_ALLOW_CODE_EVAL"] = "1"
-
-    dataset = load_odex_test_dataset()
-    code_eval_metric = evaluate.load("code_eval")
-
-    model, tokenizer = load_model_and_tokenizer(args)
-
-    if args.num_few_shot_examples > -1:
-        # zero-shot learning
-        few_shot_prompt = "Generate one line of Python code given an instruction."
-        if args.num_few_shot_examples > 0:
-            # few-shot learning
-            examples = read_icl_examples()
-            for n in range(1, args.num_few_shot_examples + 1):
-                few_shot_prompt += f"\n### Instruction:\n{examples[f'instruction{n}']}\
-                                     \n### Answer:\n{examples[f'solution{n}']}\n"
-
-    def preprocess_function(example):
-        prompt = "\n### Instruction:\n" + example["intent"] + "\n### Response:\n"
-        if args.num_few_shot_examples >= 0:
-            prompt = few_shot_prompt + prompt
-        model_inputs = tokenizer(prompt)
-        return model_inputs
-
-    test_dataset = dataset.map(preprocess_function,
-                               num_proc=args.num_workers,
-                               remove_columns=dataset.column_names,
-                               desc="Generating samples features.")
-    dataloader = DataLoader(test_dataset,
-                            batch_size=1,
-                            collate_fn=default_data_collator,
-                            pin_memory=True)
-
-    gen_token_dict = defaultdict(list)
-    for step, sample in tqdm(enumerate(dataloader), total=len(test_dataset)):
-        with torch.no_grad():
-            generated_sequences = model.generate(
-                input_ids=sample["input_ids"].to(args.device),
-                num_beams=args.num_beams,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                max_new_tokens=args.conala_max_target_length,
-                num_return_sequences=args.num_return_sequences,
-                stopping_criteria=StoppingCriteriaList(
-                    [EndOfFunctionCriteria(sample["input_ids"].shape[1], EOF_STRINGS, tokenizer)]
-                )
-            )
-            generated_sequences = generated_sequences.cpu().numpy()
-            new_tokens = generated_sequences[:, sample["input_ids"].shape[1]:]
-
-            for task, new_tokens in zip([step] * args.num_return_sequences, new_tokens):
-                gen_token_dict[task].append(new_tokens)
-
-    code_gens = [[] for _ in range(len(test_dataset))]
-    for (task, generations), sample in zip(gen_token_dict.items(), dataset):
-        for gen_tokens in generations:
-            gen_code = tokenizer.decode(gen_tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-            gen_code = re.split("(%s)" % "|".join(EOF_STRINGS), gen_code.strip())[0]
-            func_def = sample["prompt"].split("\n")[0] + "\n\treturn "
-            solution = f"{func_def}{gen_code}".replace("\t", " " * 4)
-            code_gens[task].append(solution)
-
-    references = []
-    for task in tqdm(range(len(test_dataset))):
-        test_case = dataset[task]["test"][0]
-        entry_point = dataset[task]["entry_point"]
-        check_function = '\n'.join([
-            dataset[task]['test_start'],
-            ''.join(test_case),
-            '',
-            f"check({entry_point})",
-        ])
-        references.append(check_function)
-
-    pass_at_k, results = code_eval_metric.compute(
-        references=references, predictions=code_gens, num_workers=args.num_workers, k=[1, 2, 5, 10]
-    )
-    print(f"Results: {pass_at_k}")
-
-    fname = "odex_results.json"
-    if args.num_few_shot_examples > -1:
-        fname = f"odex_results_{args.num_few_shot_examples}shot.json"
-    with open(f"{args.output_dir}/{fname}", "w") as fp:
-        json.dump(pass_at_k, fp)
-'''

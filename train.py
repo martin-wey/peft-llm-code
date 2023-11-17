@@ -3,6 +3,7 @@ import math
 
 import torch
 import wandb
+from datasets import concatenate_datasets
 from peft import (
     get_peft_model,
     TaskType,
@@ -110,8 +111,15 @@ def load_model_and_tokenizer(args):
 
 
 def run_train(args):
-    dataset_loading_func = globals().get(f"load_{args.dataset}_train_dataset")
-    dataset = dataset_loading_func()
+    if args.dataset == "joint":
+        dataset = load_conala_train_dataset()
+        codealpaca = load_codealpaca_train_dataset()
+        dataset["train"] = concatenate_datasets([dataset["train"], codealpaca["train"]])
+        dataset["validation"] = concatenate_datasets([dataset["validation"], codealpaca["validation"]])
+        dataset.shuffle(args.seed)
+    else:
+        dataset_loading_func = globals().get(f"load_{args.dataset}_train_dataset")
+        dataset = dataset_loading_func()
     code_column = "cmd"
     intent_column = "nl"
     print(dataset["train"], dataset["validation"])

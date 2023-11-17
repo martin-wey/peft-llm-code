@@ -67,7 +67,7 @@ LORA_IA3_TARGET_MODULES = {
         "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
         "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]
-    },
+    }
 }
 
 

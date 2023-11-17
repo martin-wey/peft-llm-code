@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", default="NinedayWang/PolyCoder-160M", type=str,
+    parser.add_argument("--model_name_or_path", default="Salesforce/codegen-350M-mono", type=str,
                         help="Name of the pretrained model on Huggingface Hub or in local storage.")
     parser.add_argument("--output_dir", default="./runs", type=str, help="Output directory.")
     parser.add_argument("--run_name", default=None, type=str)
@@ -63,7 +63,6 @@ if __name__ == "__main__":
 
     args.num_gpus = torch.cuda.device_count()
 
-    # Setup logging and output directories
     if args.adapter_path is not None:
         args.model_name = args.adapter_path.split('/')[-1]
     else:
@@ -71,6 +70,8 @@ if __name__ == "__main__":
     if args.run_name is None:
         if args.do_train:
             args.run_name = f"{args.dataset}/{args.model_name}_{args.tuning_method}"
+        elif args.do_test and "joint" in args.adapter_path:
+            args.run_name = f"{args.model_name}_joint"
         else:
             args.run_name = args.model_name
     run_intermediate_path = "checkpoints" if args.do_train else "test_results"
