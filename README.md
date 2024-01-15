@@ -1,6 +1,6 @@
 
-# An Empirical Study on Parameter-Efficient Fine-Tuning of Large Language Models for Code Generation
-Official replication package for our submission to MSR 2024.
+# Exploring Parameter-Efficient Fine-Tuning Techniques for Code Generation with Large Language Models
+Official replication package for our submission to TOSEM.
 
 In this readme, we provide detailed instructions on how to setup the repository and run the paper experiments. 
 Our code can easily be adapted to further investigate the usage of parameter-efficient fine-tuning techniques for large language models for other generation tasks.
