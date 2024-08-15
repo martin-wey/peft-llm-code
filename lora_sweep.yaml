@@ -1,0 +1,17 @@
+program: run_sft.sh
+name: lora_sweep
+method: grid
+metric:
+  goal: minimize
+  name: eval_loss
+parameters:
+  lora_r:
+    values: [8, 16, 32, 64]
+  lora_alpha:
+    values: [16, 32, 64, 128]
+
+command:
+- ${env}
+- bash
+- ${program}
+- ${args}
