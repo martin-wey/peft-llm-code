@@ -64,20 +64,29 @@ def transform_code_alpaca(output_dir="datasets"):
 def transform_apps(output_dir="datasets"):
     # this preprocessing follows the same format used in the original APPs paper:
     # https://github.com/hendrycks/apps/blob/main/train/dataset_apps/APPSBaseDataset.py
+    # https://huggingface.co/spaces/codeparrot/apps_metric/blob/main/example_script.py
 
     dataset = load_dataset("codeparrot/apps", trust_remote_code=True)
 
     def process_example(e):
+        starter_code = None if len(e["starter_code"]) == 0 else e["starter_code"]
+        try:
+            input_outpout = json.loads(e["input_output"])
+            fn_name = None if not input_outpout.get("fn_name") else input_outpout["fn_name"]
+        except ValueError:
+            fn_name = None
         try:
             solutions = json.loads(e["solutions"])
-        except:
+        except ValueError:
             solutions = [""]
-        question = e["question"]
 
-        if e["starter_code"] != "":
-            question += "\n" + e["starter_code"] + "\n" + "\nUse Call-Based format\n"
+        _input = e["question"]
+        if starter_code:
+            _input += starter_code
+        if fn_name:
+            _input += "\nUse Standard Input format\n"
         else:
-            question += "\n" + "\nUse Standard Input format\n"
+            _input += "\nUse Call-Based format\n"
 
         messages = [
             {
@@ -86,7 +95,7 @@ def transform_apps(output_dir="datasets"):
             },
             {
                 "role": "user",
-                "content": question
+                "content": _input
             },
             {
                 "role": "assistant",
@@ -111,5 +120,5 @@ def transform_apps(output_dir="datasets"):
 
 if __name__ == "__main__":
     # transform_conala()
-    transform_code_alpaca()
-    # transform_apps()
+    # transform_code_alpaca()
+    transform_apps()

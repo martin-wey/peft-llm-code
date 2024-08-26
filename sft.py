@@ -37,10 +37,6 @@ if __name__ == "__main__":
     training_args.disable_tqdm = True
     console = Console()
 
-    datasets = load_dataset("neulab/docprompting-conala", split="train")
-    datasets = datasets.filter(lambda x: x["nl"] is not None)
-    datasets = datasets.filter(lambda x: x["cmd"] is not None)
-
     quantization_config = get_quantization_config(model_config)
     model_kwargs = dict(
         revision=model_config.model_revision,
@@ -55,6 +51,8 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(
         model_config.model_name_or_path, trust_remote_code=model_config.trust_remote_code, use_fast=True
     )
+    if "meta-llama" in model_config.model_name_or_path:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     raw_datasets = load_from_disk(args.dataset_name)
     train_dataset = raw_datasets[args.dataset_train_split]

@@ -1,6 +1,11 @@
+import functools
+import os
+import subprocess
+import time
 from dataclasses import field, dataclass
 from typing import Optional, List
 
+import torch
 from trl import is_peft_available
 from trl.core import flatten_dict
 
@@ -8,73 +13,67 @@ if is_peft_available():
     from peft import LoraConfig, PeftConfig, PromptEncoderConfig, PrefixTuningConfig, PromptTuningConfig, \
         PromptTuningInit
 
-LORA_IA3_TARGET_MODULES = {
-    "codegen-350M-mono": {
-        "target_modules_lora": ["qkv_proj"],
-        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
-        "ff_modules": ["fc_in", "fc_out"]
-    },
-    "codet5p-220m": {
-        "target_modules_lora": ["q", "v", "k"],
-        "target_modules_ia3": ["q", "v", "k", "wi", "wo"],
-        "ff_modules": ["wi", "wo"]
-    },
-    "codet5p-770m": {
-        "target_modules_lora": ["q", "v", "k"],
-        "target_modules_ia3": ["q", "v", "k", "wi", "wo"],
-        "ff_modules": ["wi", "wo"]
-    },
-    "codet5p-2b": {
-        "target_modules_lora": ["qkv_proj"],
-        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
-        "ff_modules": ["fc_in", "fc_out"]
-    },
-    "codet5p-6b": {
-        "target_modules_lora": ["qkv_proj"],
-        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
-        "ff_modules": ["fc_in", "fc_out"]
-    },
-    "codegen2-1B": {
-        "target_modules_lora": ["qkv_proj"],
-        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
-        "ff_modules": ["fc_in", "fc_out"]
-    },
-    "codegen2-3_7B": {
-        "target_modules_lora": ["qkv_proj"],
-        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
-        "ff_modules": ["fc_in", "fc_out"]
-    },
-    "codegen2-7B": {
-        "target_modules_lora": ["qkv_proj"],
-        "target_modules_ia3": ["qkv_proj", "fc_in", "fc_out"],
-        "ff_modules": ["fc_in", "fc_out"]
-    },
-    "CodeLlama-7b-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
-    },
-    "CodeLlama-7b-Instruct-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
-    },
-    "CodeLlama-7b-Python-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
-    },
-    "CodeLlama-13b-Python-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
-    },
-    "CodeLlama-34b-Python-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        "ff_modules": ["gate_proj", "up_proj", "down_proj"]
-    }
+
+MODELS_CHAT_USER = {
+    "Phi-3-mini-128k-instruct": "<|user|>",
+    "DeepSeek-Coder-V2-Lite-Instruct": "User:",
 }
+
+LORA_TARGET_MODULES = {
+    "Phi-3-mini-128k-instruct": ["o_proj", "qkv_proj"],
+    "deepseek-coder-6.7b-instruct": ["q_proj", "v_proj", "o_proj", "k_proj"],
+    "CodeQwen1.5-7B-Chat": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
+    "Meta-Llama-3.1-8B-Instruct": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
+    "codegemma-7b-it": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
+    "DeepSeek-Coder-V2-Lite-Instruct ": [""],
+}
+
+
+def get_gpu_memory_usage():
+    try:
+        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", None)
+        if visible_devices is None:
+            # select all available GPUs
+            gpu_ids = range(torch.cuda.device_count())
+        else:
+            # select active GPUs for the current script
+            gpu_ids = list(map(int, visible_devices.split(',')))
+
+        result = subprocess.check_output(
+            ['nvidia-smi', '--query-gpu=memory.used', '--format=csv,nounits,noheader'],
+            encoding='utf-8'
+        )
+
+        # sum GPU memory usage from active GPUs
+        gpu_memory = [int(x) for x in result.strip().split('\n')]
+        total_memory_used = sum(gpu_memory[gpu_id] for gpu_id in gpu_ids)
+
+        return total_memory_used
+    except Exception:
+        return -1
+
+
+def track_gpu_usage(func):
+    @functools.wraps(func)
+    def wrapper_track_gpu_usage(*args, **kwargs):
+        initial_gpu_memory = get_gpu_memory_usage()
+        max_gpu_memory_usage = initial_gpu_memory
+        start_time = time.time()
+        result = []
+        try:
+            gen = func(*args, **kwargs)
+            for sample_index, output in enumerate(gen):
+                current_gpu_memory = get_gpu_memory_usage()
+                max_gpu_memory_usage = max(max_gpu_memory_usage, current_gpu_memory)
+                result.append(output)
+        except Exception as e:
+            print(f"Error during execution: {e}")
+        finally:
+            end_time = time.time()
+
+        return result, initial_gpu_memory, max_gpu_memory_usage, end_time - start_time
+
+    return wrapper_track_gpu_usage
 
 
 @dataclass
@@ -84,7 +83,7 @@ class SFTScriptArguments:
         metadata={"help": "the dataset name"},
     )
     dataset_train_split: str = field(default="train", metadata={"help": "The dataset split to train on"})
-    dataset_test_split: str = field(default="test", metadata={"help": "The dataset split to evaluate on"})
+    dataset_test_split: str = field(default="validation", metadata={"help": "The dataset split to evaluate on"})
     config: str = field(default=None, metadata={"help": "Path to the optional config file"})
     gradient_checkpointing_use_reentrant: bool = field(
         default=False,
@@ -124,7 +123,7 @@ class ModelConfig:
             "choices": ["auto", "bfloat16", "float16", "float32"],
         },
     )
-    trust_remote_code: bool = field(default=False, metadata={"help": "Trust remote code when loading a model."})
+    trust_remote_code: bool = field(default=True, metadata={"help": "Trust remote code when loading a model."})
     attn_implementation: Optional[str] = field(
         default=None,
         metadata={
@@ -230,6 +229,8 @@ def get_peft_config(model_config: ModelConfig) -> "Optional[PeftConfig]":
             "Make sure to run `pip install -U peft`."
         )
 
+    model_name = model_config.model_name_or_path.split("/")[-1]
+
     if model_config.use_lora:
         peft_config = LoraConfig(
             use_dora=model_config.use_dora,
@@ -238,7 +239,7 @@ def get_peft_config(model_config: ModelConfig) -> "Optional[PeftConfig]":
             lora_dropout=model_config.lora_dropout,
             bias="none",
             task_type=model_config.task_type,
-            target_modules=model_config.lora_target_modules,
+            target_modules=LORA_TARGET_MODULES[model_name],
             modules_to_save=model_config.lora_modules_to_save,
         )
     elif model_config.use_p_tuning:
@@ -260,6 +261,7 @@ def get_peft_config(model_config: ModelConfig) -> "Optional[PeftConfig]":
             prompt_tuning_init=PromptTuningInit.TEXT,
             prompt_tuning_init_text=prompt_tuning_init_text,
             tokenizer_name_or_path=model_config.model_name_or_path,
+            num_virtual_tokens=model_config.num_virtual_tokens,
         )
     else:
         peft_config = None
