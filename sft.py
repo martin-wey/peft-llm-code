@@ -1,41 +1,46 @@
-# base script: https://github.com/huggingface/trl/blob/main/examples/scripts/sft.py
-
 import logging
 
-from trl.commands.cli_utils import init_zero_verbose, TrlParser
+from datasets import load_from_disk
 
-init_zero_verbose()
-FORMAT = "%(message)s"
+from peft import get_peft_model
 
 from rich.console import Console
 from rich.logging import RichHandler
 
-from datasets import load_dataset, load_from_disk
-
 from tqdm.rich import tqdm
-from transformers import AutoTokenizer
+
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    DataCollatorWithPadding,
+    Trainer
+)
+
+from transformers.trainer_callback import PrinterCallback
 
 from trl import (
-    RichProgressCallback,
     SFTConfig,
-    SFTTrainer,
     DataCollatorForCompletionOnlyLM,
     get_quantization_config,
-    get_kbit_device_map,
+    get_kbit_device_map, RichProgressCallback
 )
+from trl.commands.cli_utils import init_zero_verbose, TrlParser
 
 from utils import SFTScriptArguments, ModelConfig, get_peft_config
 
+init_zero_verbose()
 tqdm.pandas()
+logging.basicConfig(format="%(message)s", datefmt="[%X]", handlers=[RichHandler()], level=logging.INFO)
 
-logging.basicConfig(format=FORMAT, datefmt="[%X]", handlers=[RichHandler()], level=logging.INFO)
 
-if __name__ == "__main__":
-    parser = TrlParser((SFTScriptArguments, SFTConfig, ModelConfig))
-    args, training_args, model_config = parser.parse_args_and_config()
-
-    training_args.disable_tqdm = True
-    console = Console()
+def load_model_and_tokenizer(model_config):
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_config.model_name_or_path,
+        trust_remote_code=model_config.trust_remote_code,
+        use_fast=True
+    )
+    if getattr(tokenizer, "pad_token", None) is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
     quantization_config = get_quantization_config(model_config)
     model_kwargs = dict(
@@ -47,37 +52,63 @@ if __name__ == "__main__":
         device_map=get_kbit_device_map() if quantization_config is not None else None,
         quantization_config=quantization_config,
     )
-    training_args.model_init_kwargs = model_kwargs
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path, trust_remote_code=model_config.trust_remote_code, use_fast=True
-    )
-    if "meta-llama" in model_config.model_name_or_path:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
+    model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs)
+    peft_config = get_peft_config(model_config, tokenizer)
+    model = get_peft_model(model, peft_config) if peft_config is not None else model
 
-    raw_datasets = load_from_disk(args.dataset_name)
-    train_dataset = raw_datasets[args.dataset_train_split]
-    eval_dataset = raw_datasets[args.dataset_test_split]
+    return model, tokenizer
+
+
+if __name__ == "__main__":
+    parser = TrlParser((SFTScriptArguments, SFTConfig, ModelConfig))
+    args, training_args, model_config = parser.parse_args_and_config()
+
+    training_args.disable_tqdm = True
+    console = Console()
+
+    model, tokenizer = load_model_and_tokenizer(model_config)
+
+    def tokenize(examples):
+        messages = tokenizer.apply_chat_template(examples["messages"], tokenize=False)
+        outputs = tokenizer(
+            messages,
+            truncation=True,
+            padding=False,
+            max_length=training_args.max_seq_length,
+        )
+
+        return {"input_ids": outputs["input_ids"], "attention_mask": outputs["attention_mask"]}
+
+    dataset = load_from_disk(args.dataset_name)
+    tokenized_dataset = dataset.map(
+        tokenize,
+        batched=True,
+        remove_columns=[cn for cn in dataset["train"].column_names if cn not in ["input_ids", "attention_mask"]],
+        num_proc=training_args.dataset_num_proc,
+        batch_size=training_args.dataset_batch_size
+    )
+
+    train_dataset = tokenized_dataset[args.dataset_train_split]
+    eval_dataset = tokenized_dataset[args.dataset_test_split]
 
     if args.completion_only:
         # ensures the instruction is ignored during loss computation
         response_template = args.response_template
         collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
+    else:
+        collator = DataCollatorWithPadding(tokenizer)
 
-    console.print(model_config)
-
-    trainer = SFTTrainer(
-        model=model_config.model_name_or_path,
+    trainer = Trainer(
+        model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
         data_collator=collator,
-        peft_config=get_peft_config(model_config, tokenizer),
         callbacks=[RichProgressCallback]
     )
 
-    trainable_params = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
-    console.print(f"Number of trainable parameters: {trainable_params:,}")
+    console.print(model_config)
+    trainer.model.print_trainable_parameters()
 
     """
     # check data preprocessing
@@ -91,5 +122,8 @@ if __name__ == "__main__":
         print(tokenizer.decode(input_ids))
         break
     """
-
+    trainer.remove_callback(PrinterCallback)
     trainer.train()
+    trainer.model.save_pretrained(f"runs/{training_args.run_name}/best_model_checkpoint")
+
+
