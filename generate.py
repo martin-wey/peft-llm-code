@@ -32,12 +32,19 @@ def generate(args, dataset, model, tokenizer):
             tokenized_sample = tokenizer.apply_chat_template(
                 sample["messages"],
                 add_generation_prompt=True,
-                return_tensors="pt"
+                return_tensors="pt",
+                return_dict=True
             ).to(model.device)
 
-            outputs = model.generate(tokenized_sample, max_new_tokens=args.max_new_tokens, **gen_kwargs)
-            response_ids = outputs[0][tokenized_sample.shape[1]:]
+            outputs = model.generate(
+                input_ids=tokenized_sample["input_ids"],
+                attention_mask=tokenized_sample["attention_mask"],
+                max_new_tokens=args.max_new_tokens,
+                **gen_kwargs
+            )
+            response_ids = outputs[0][tokenized_sample["input_ids"].shape[1]:]
             response = tokenizer.decode(response_ids, skip_special_tokens=True)
+            print(response)
 
             # postprocess in case the model does not generate EOS token
             if args.model_name in MODELS_CHAT_USER:
@@ -90,6 +97,7 @@ def main(args):
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
     dataset = load_from_disk(args.dataset_name_or_path)["test"]
+
     # remove ground truth from the prompt
     dataset = dataset.map(lambda e: {"messages": e["messages"][:-1]}, num_proc=8)
     args.dataset_name = args.dataset_name_or_path.split("/")[-1]

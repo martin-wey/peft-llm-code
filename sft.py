@@ -72,7 +72,7 @@ if __name__ == "__main__":
         eval_dataset=eval_dataset,
         tokenizer=tokenizer,
         data_collator=collator,
-        peft_config=get_peft_config(model_config),
+        peft_config=get_peft_config(model_config, tokenizer),
         callbacks=[RichProgressCallback]
     )
 

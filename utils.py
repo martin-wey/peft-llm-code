@@ -6,6 +6,7 @@ from dataclasses import field, dataclass
 from typing import Optional, List
 
 import torch
+from transformers import AutoTokenizer
 from trl import is_peft_available
 from trl.core import flatten_dict
 
@@ -200,10 +201,6 @@ class ModelConfig:
         default=128,
         metadata={"help": ("Encoder hidden size for p-tuning.")},
     )
-    encoder_num_layers: int = field(
-        default=2,
-        metadata={"help": ("Encoder number of layers for p-tuning.")},
-    )
 
     def to_dict(self):
         output_dict = {}
@@ -219,7 +216,7 @@ class ModelConfig:
             self.lora_target_modules = self.lora_target_modules[0]
 
 
-def get_peft_config(model_config: ModelConfig) -> "Optional[PeftConfig]":
+def get_peft_config(model_config: ModelConfig, tokenizer: AutoTokenizer) -> "Optional[PeftConfig]":
     if model_config.use_peft is False:
         return None
 
@@ -247,21 +244,15 @@ def get_peft_config(model_config: ModelConfig) -> "Optional[PeftConfig]":
             task_type=model_config.task_type,
             num_virtual_tokens=model_config.num_virtual_tokens,
             encoder_hidden_size=model_config.encoder_hidden_size,
-            encoder_num_layers=model_config.encoder_num_layers,
-        )
-    elif model_config.use_prefix_tuning:
-        peft_config = PrefixTuningConfig(
-            task_type=model_config.task_type,
-            num_virtual_tokens=model_config.num_virtual_tokens,
         )
     elif model_config.use_prompt_tuning:
-        prompt_tuning_init_text = "Generate a response given a natural language instruction."
+        prompt_tuning_init_text = "Generate a response given a natural language instruction.\n"
         peft_config = PromptTuningConfig(
             task_type=model_config.task_type,
             prompt_tuning_init=PromptTuningInit.TEXT,
+            num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),
             prompt_tuning_init_text=prompt_tuning_init_text,
             tokenizer_name_or_path=model_config.model_name_or_path,
-            num_virtual_tokens=model_config.num_virtual_tokens,
         )
     else:
         peft_config = None
