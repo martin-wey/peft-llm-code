@@ -11,7 +11,7 @@ from trl import is_peft_available
 from trl.core import flatten_dict
 
 if is_peft_available():
-    from peft import LoraConfig, PeftConfig, PromptEncoderConfig, PrefixTuningConfig, PromptTuningConfig, \
+    from peft import LoraConfig, PeftConfig, PromptEncoderConfig, PromptTuningConfig, \
         PromptTuningInit
 
 
@@ -25,7 +25,7 @@ LORA_TARGET_MODULES = {
     "deepseek-coder-6.7b-instruct": ["q_proj", "v_proj", "o_proj", "k_proj"],
     "CodeQwen1.5-7B-Chat": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
     "Meta-Llama-3.1-8B-Instruct": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
-    "codegemma-7b-it": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
+    "CodeLlama-7b-Instruct-hf": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
     "DeepSeek-Coder-V2-Lite-Instruct ": [""],
 }
 

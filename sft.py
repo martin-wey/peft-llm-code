@@ -12,7 +12,7 @@ from tqdm.rich import tqdm
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
-    DataCollatorWithPadding,
+    DataCollatorForLanguageModeling,
     Trainer
 )
 
@@ -53,6 +53,7 @@ def load_model_and_tokenizer(model_config):
         quantization_config=quantization_config,
     )
     model = AutoModelForCausalLM.from_pretrained(model_config.model_name_or_path, **model_kwargs)
+    model.enable_input_require_grads()
     peft_config = get_peft_config(model_config, tokenizer)
     model = get_peft_model(model, peft_config) if peft_config is not None else model
 
@@ -69,14 +70,12 @@ if __name__ == "__main__":
     model, tokenizer = load_model_and_tokenizer(model_config)
 
     def tokenize(examples):
-        messages = tokenizer.apply_chat_template(examples["messages"], tokenize=False)
-        outputs = tokenizer(
-            messages,
+        outputs = tokenizer.apply_chat_template(
+            examples["messages"],
             truncation=True,
-            padding=False,
             max_length=training_args.max_seq_length,
+            return_dict=True
         )
-
         return {"input_ids": outputs["input_ids"], "attention_mask": outputs["attention_mask"]}
 
     dataset = load_from_disk(args.dataset_name)
@@ -91,12 +90,11 @@ if __name__ == "__main__":
     train_dataset = tokenized_dataset[args.dataset_train_split]
     eval_dataset = tokenized_dataset[args.dataset_test_split]
 
+    collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
     if args.completion_only:
         # ensures the instruction is ignored during loss computation
         response_template = args.response_template
         collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
-    else:
-        collator = DataCollatorWithPadding(tokenizer)
 
     trainer = Trainer(
         model=model,
@@ -124,6 +122,3 @@ if __name__ == "__main__":
     """
     trainer.remove_callback(PrinterCallback)
     trainer.train()
-    trainer.model.save_pretrained(f"runs/{training_args.run_name}/best_model_checkpoint")
-
-

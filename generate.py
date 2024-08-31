@@ -36,21 +36,31 @@ def generate(args, dataset, model, tokenizer):
                 return_dict=True
             ).to(model.device)
 
-            outputs = model.generate(
-                input_ids=tokenized_sample["input_ids"],
-                attention_mask=tokenized_sample["attention_mask"],
-                max_new_tokens=args.max_new_tokens,
-                **gen_kwargs
-            )
+            if args.peft_checkpoint_path is not None and "dora" in args.peft_checkpoint_path:
+                with torch.amp.autocast("cuda"):
+                    outputs = model.generate(
+                        input_ids=tokenized_sample["input_ids"],
+                        attention_mask=tokenized_sample["attention_mask"],
+                        max_new_tokens=args.max_new_tokens,
+                        **gen_kwargs
+                    )
+            else:
+                outputs = model.generate(
+                     input_ids=tokenized_sample["input_ids"],
+                     attention_mask=tokenized_sample["attention_mask"],
+                     max_new_tokens=args.max_new_tokens,
+                     **gen_kwargs
+                 )
+
             response_ids = outputs[0][tokenized_sample["input_ids"].shape[1]:]
             response = tokenizer.decode(response_ids, skip_special_tokens=True)
-            print(response)
 
             # postprocess in case the model does not generate EOS token
             if args.model_name in MODELS_CHAT_USER:
                 response_blocks = response.split(MODELS_CHAT_USER[args.model_name])
                 response = response_blocks[0].strip()
-            yield response
+
+            yield response.strip()
 
 
 def compute_metrics(args, responses, dataset):
@@ -93,6 +103,8 @@ def main(args):
     )
     if args.peft_checkpoint_path is not None:
         model = PeftModel.from_pretrained(model, args.peft_checkpoint_path)
+        if "dora" in args.peft_checkpoint_path:
+            model = model.merge_and_unload()
     args.model_name = args.model_name_or_path.split("/")[-1]
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
