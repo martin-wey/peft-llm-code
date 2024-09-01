@@ -4,16 +4,36 @@ import os
 
 import evaluate
 import torch
+from langchain.docstore.document import Document as LangchainDocument
+from langchain_community.vectorstores import FAISS
+from langchain_community.vectorstores.utils import DistanceStrategy
+from langchain_huggingface import HuggingFaceEmbeddings
 from peft import PeftModel
 from rich.progress import MofNCompleteColumn, BarColumn, Progress, TextColumn, TimeElapsedColumn
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+from tqdm import tqdm
+from transformers import set_seed, AutoModelForCausalLM, AutoTokenizer
 
 from datasets import load_from_disk
 from utils import track_gpu_usage, MODELS_CHAT_USER
 
 
+def prepare_input(sample, knowledge_base_vectors, args):
+    if knowledge_base_vectors is not None:
+        query = sample[args.instruction_field]
+        retrieved_docs = knowledge_base_vectors.similarity_search(query=query, k=args.rag_top_k)
+
+        chat_docs = []
+        for doc in retrieved_docs:
+            chat_docs += [
+                {"role": "user", "content": doc.page_content},
+                {"role": "assistant", "content": doc.metadata["code"]}
+            ]
+        return [sample["messages"][0]] + chat_docs + sample["messages"][1:-1]
+    return sample["messages"][:-1]
+
+
 @track_gpu_usage
-def generate(args, dataset, model, tokenizer):
+def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None):
     gen_kwargs = {
         "do_sample": args.do_sample,
         "temperature": args.temperature,
@@ -29,28 +49,20 @@ def generate(args, dataset, model, tokenizer):
             TimeElapsedColumn(),
     ) as p):
         for sample in p.track(dataset):
+            input = prepare_input(sample, knowledge_base_vectors, args)
             tokenized_sample = tokenizer.apply_chat_template(
-                sample["messages"],
+                input,
                 add_generation_prompt=True,
                 return_tensors="pt",
                 return_dict=True
             ).to(model.device)
 
-            if args.peft_checkpoint_path is not None and "dora" in args.peft_checkpoint_path:
-                with torch.amp.autocast("cuda"):
-                    outputs = model.generate(
-                        input_ids=tokenized_sample["input_ids"],
-                        attention_mask=tokenized_sample["attention_mask"],
-                        max_new_tokens=args.max_new_tokens,
-                        **gen_kwargs
-                    )
-            else:
-                outputs = model.generate(
-                     input_ids=tokenized_sample["input_ids"],
-                     attention_mask=tokenized_sample["attention_mask"],
-                     max_new_tokens=args.max_new_tokens,
-                     **gen_kwargs
-                 )
+            outputs = model.generate(
+                input_ids=tokenized_sample["input_ids"],
+                attention_mask=tokenized_sample["attention_mask"],
+                max_new_tokens=args.max_new_tokens,
+                **gen_kwargs
+            )
 
             response_ids = outputs[0][tokenized_sample["input_ids"].shape[1]:]
             response = tokenizer.decode(response_ids, skip_special_tokens=True)
@@ -75,10 +87,12 @@ def compute_metrics(args, responses, dataset):
         """
         return {}
     else:
-        references = dataset[args.reference_field]
         chrf = evaluate.load("chrf")
         em = evaluate.load("exact_match")
+
+        references = dataset[args.reference_field]
         results_em = em.compute(predictions=responses, references=references)
+
         references_chrf = [[ref] for ref in references]
         results_chrf = chrf.compute(predictions=responses, references=references_chrf)
         results_chrf2 = chrf.compute(predictions=responses, references=references_chrf, word_order=2)
@@ -103,15 +117,11 @@ def main(args):
     )
     if args.peft_checkpoint_path is not None:
         model = PeftModel.from_pretrained(model, args.peft_checkpoint_path)
-        if "dora" in args.peft_checkpoint_path:
-            model = model.merge_and_unload()
+        model = model.merge_and_unload()
     args.model_name = args.model_name_or_path.split("/")[-1]
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
     dataset = load_from_disk(args.dataset_name_or_path)["test"]
-
-    # remove ground truth from the prompt
-    dataset = dataset.map(lambda e: {"messages": e["messages"][:-1]}, num_proc=8)
     args.dataset_name = args.dataset_name_or_path.split("/")[-1]
 
     if args.dataset_name == "conala":
@@ -127,11 +137,15 @@ def main(args):
         args.instruction_field = "question"
         args.reference_field = "solutions"
 
+    knowledge_base_vectors = None
     if args.use_icl:
-        train_set = load_from_disk(args.dataset_name_or_path)["train"].shuffle(args.icl_seed).select(
-            range(args.num_icl_examples))
+        examples = (
+            load_from_disk(args.dataset_name_or_path)["train"]
+            .shuffle(args.icl_seed)
+            .select(range(args.num_icl_examples))
+        )
         chat_icl = []
-        for example in train_set:
+        for example in examples:
             if args.dataset_name == "apps":
                 reference = json.loads(example[args.reference_field])[0]
             else:
@@ -143,20 +157,37 @@ def main(args):
             chat_icl += chat_exemple
 
         def add_icl_prompt(example):
-            if "gemma" in args.model_name:
-                example["messages"] = chat_icl + example["messages"][1:]
-            else:
-                example["messages"] = [example["messages"][0]] + chat_icl + example["messages"][1:]
+            example["messages"] = [example["messages"][0]] + chat_icl + example["messages"][1:]
             return example
 
         dataset = dataset.map(add_icl_prompt, num_proc=16)
+    elif args.use_rag:
+        examples = load_from_disk(args.dataset_name_or_path)["train"]
+        knowledge_base = [
+            LangchainDocument(
+                page_content=sample[args.instruction_field],
+                metadata={"code": sample[args.reference_field]}
+            ) for sample in tqdm(examples)
+        ]
 
-    responses, init_gpu_memory, peak_gpu_memory, total_execution_time = generate(args, dataset, model, tokenizer)
+        embedding_model = HuggingFaceEmbeddings(
+            model_name=args.rag_encoder_model,
+            multi_process=False,
+            model_kwargs={"device": "cuda"},
+            encode_kwargs={"normalize_embeddings": True},  # Set `True` for cosine similarity
+        )
 
-    if args.peft_checkpoint_path is not None:
-        output_dir = f"{args.peft_checkpoint_path}/results"
-    else:
-        output_dir = f"runs/{args.model_name}/results"
+        knowledge_base_vectors = FAISS.from_documents(
+            knowledge_base, embedding_model, distance_strategy=DistanceStrategy.COSINE
+        )
+
+    responses, init_gpu_memory, peak_gpu_memory, total_execution_time = (
+        generate(args, dataset, model, tokenizer, knowledge_base_vectors)
+    )
+
+    output_dir = (
+        f"{args.peft_checkpoint_path}/results" if args.peft_checkpoint_path else f"runs/{args.model_name}/results"
+    )
     os.makedirs(output_dir, exist_ok=True)
 
     metrics = compute_metrics(args, responses, dataset)
@@ -170,6 +201,8 @@ def main(args):
     file_suffix = f"{args.dataset_name}_t{args.temperature}"
     if args.use_icl:
         file_suffix += f"_icl_n{args.num_icl_examples}_s{args.icl_seed}"
+    elif args.use_rag:
+        file_suffix += f"_rag_k{args.rag_top_k}"
 
     with open(f"{output_dir}/metrics_{file_suffix}.jsonl", "w") as fout:
         json.dump(metrics, fout)
@@ -194,6 +227,10 @@ if __name__ == "__main__":
     parser.add_argument("--use_icl", action="store_true", default=False)
     parser.add_argument("--icl_seed", type=int, default=42)
     parser.add_argument("--num_icl_examples", type=int, default=3)
+
+    parser.add_argument("--use_rag", action="store_true", default=False)
+    parser.add_argument("--rag_encoder_model", default="thenlper/gte-small", type=str)
+    parser.add_argument("--rag_top_k", default=1, type=int)
 
     args = parser.parse_args()
     set_seed(42)
