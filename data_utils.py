@@ -9,10 +9,6 @@ def transform_conala(output_dir="datasets"):
     def process_example(e):
         messages = [
             {
-                "role": "system",
-                "content": "You are a helpful assistant."
-            },
-            {
                 "role": "user",
                 "content": e["nl"]
             },
@@ -32,10 +28,6 @@ def transform_code_alpaca(output_dir="datasets"):
 
     def process_example(e):
         messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant."
-            },
             {
                 "role": "user",
                 "content": e["prompt"]
@@ -89,10 +81,6 @@ def transform_apps(output_dir="datasets"):
             _input += "\nUse Call-Based format\n"
 
         messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant."
-            },
             {
                 "role": "user",
                 "content": _input

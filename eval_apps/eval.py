@@ -9,7 +9,7 @@ start = time.time()
 print(start)
 
 apps_metric = evaluate.load('codeparrot/apps_metric', keep_in_memory=True)
-results = apps_metric.compute(predictions=responses, k_list=[1], level="all")
+results = apps_metric.compute(predictions=responses, level="all")
 print(results)
 
 end = time.time()

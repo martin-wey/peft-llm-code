@@ -1,11 +1,13 @@
 import logging
 
+import torch
 from rich.console import Console
 from rich.logging import RichHandler
 from tqdm.rich import tqdm
 from transformers import (
     AutoTokenizer,
-    DataCollatorForLanguageModeling
+    DataCollatorForLanguageModeling,
+    TrainerCallback
 )
 from trl import (
     SFTTrainer,
@@ -26,6 +28,33 @@ from utils import (
 init_zero_verbose()
 tqdm.pandas()
 logging.basicConfig(format="%(message)s", datefmt="[%X]", handlers=[RichHandler()], level=logging.INFO)
+
+
+class EvaluateGenerationCallback(TrainerCallback):
+    def on_epoch_begin(self, args, state, control, **kwargs):
+        model = kwargs['model']
+        tokenizer = kwargs['tokenizer']
+
+        model.eval()
+
+        messages = [
+            {"role": "user", "content": "divide the values with same keys of two dictionary `d1` and `d2`"}
+        ]
+        inputs = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        ).to(model.device)
+
+        with torch.no_grad():
+            outputs = model.generate(**inputs, max_length=128)
+
+        response_ids = outputs[0][inputs["input_ids"].shape[1]:]
+        response = tokenizer.decode(response_ids, skip_special_tokens=False)
+        print(response.strip())
+        model.train()
+        return control
 
 
 if __name__ == "__main__":
@@ -73,7 +102,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         data_collator=collator,
         peft_config=get_peft_config(model_config, tokenizer),
-        callbacks=[RichProgressCallback()]
+        callbacks=[RichProgressCallback(), EvaluateGenerationCallback()]
     )
 
     """

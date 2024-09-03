@@ -14,11 +14,11 @@ from tqdm import tqdm
 from transformers import set_seed, AutoModelForCausalLM, AutoTokenizer
 
 from datasets import load_from_disk
-from utils import track_gpu_usage, MODELS_CHAT_USER
+from utils import track_gpu_usage
 
 
 def prepare_input(sample, knowledge_base_vectors, args):
-    if knowledge_base_vectors is not None:
+    if args.use_rag:
         query = sample[args.instruction_field]
         retrieved_docs = knowledge_base_vectors.similarity_search(query=query, k=args.rag_top_k)
 
@@ -28,7 +28,7 @@ def prepare_input(sample, knowledge_base_vectors, args):
                 {"role": "user", "content": doc.page_content},
                 {"role": "assistant", "content": doc.metadata["code"]}
             ]
-        return [sample["messages"][0]] + chat_docs + sample["messages"][1:-1]
+        return chat_docs + sample["messages"][:-1]
     return sample["messages"][:-1]
 
 
@@ -49,24 +49,25 @@ def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None):
             TimeElapsedColumn(),
     ) as p):
         for sample in p.track(dataset):
-            input = prepare_input(sample, knowledge_base_vectors, args)
-            tokenized_sample = tokenizer.apply_chat_template(
-                input,
+            example = prepare_input(sample, knowledge_base_vectors, args)
+
+            inputs = tokenizer.apply_chat_template(
+                example,
                 add_generation_prompt=True,
                 return_tensors="pt",
                 return_dict=True
             ).to(model.device)
 
             outputs = model.generate(
-                input_ids=tokenized_sample["input_ids"],
-                attention_mask=tokenized_sample["attention_mask"],
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
                 max_new_tokens=args.max_new_tokens,
                 **gen_kwargs
             )
 
-            response_ids = outputs[0][tokenized_sample["input_ids"].shape[1]:]
+            response_ids = outputs[0][inputs["input_ids"].shape[1]:]
             response = tokenizer.decode(response_ids, skip_special_tokens=False)
-
+            print(response.strip())
             yield response.strip()
 
 
@@ -151,7 +152,7 @@ def main(args):
             chat_icl += chat_exemple
 
         def add_icl_prompt(example):
-            example["messages"] = [example["messages"][0]] + chat_icl + example["messages"][1:]
+            example["messages"] = chat_icl + example["messages"]
             return example
 
         dataset = dataset.map(add_icl_prompt, num_proc=16)
@@ -179,11 +180,6 @@ def main(args):
         generate(args, dataset, model, tokenizer, knowledge_base_vectors)
     )
 
-    output_dir = (
-        f"{args.peft_checkpoint_path}/results" if args.peft_checkpoint_path else f"runs/{args.model_name}/results"
-    )
-    os.makedirs(output_dir, exist_ok=True)
-
     metrics = compute_metrics(args, responses, dataset)
     metrics = {
         **metrics,
@@ -191,6 +187,11 @@ def main(args):
         "peak_gpu_memory": f"{peak_gpu_memory} MB",
         "total_execution_time": f"{total_execution_time} seconds"
     }
+
+    output_dir = (
+        f"{args.peft_checkpoint_path}/results" if args.peft_checkpoint_path else f"runs/{args.model_name}/results"
+    )
+    os.makedirs(output_dir, exist_ok=True)
 
     file_suffix = f"{args.dataset_name}_t{args.temperature}"
     if args.use_icl:
