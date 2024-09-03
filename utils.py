@@ -3,22 +3,17 @@ import os
 import subprocess
 import time
 from dataclasses import field, dataclass
-from typing import Optional, List
+from typing import Optional, List, Union, Any, Dict
 
 import torch
 from transformers import AutoTokenizer
-from trl import is_peft_available
+from trl import is_peft_available, DataCollatorForCompletionOnlyLM
 from trl.core import flatten_dict
 
 if is_peft_available():
     from peft import LoraConfig, PeftConfig, PromptEncoderConfig, PromptTuningConfig, \
         PromptTuningInit
 
-
-MODELS_CHAT_USER = {
-    "Phi-3-mini-128k-instruct": "<|user|>",
-    "DeepSeek-Coder-V2-Lite-Instruct": "User:",
-}
 
 LORA_TARGET_MODULES = {
     "Phi-3-mini-128k-instruct": ["o_proj", "qkv_proj"],
@@ -28,6 +23,20 @@ LORA_TARGET_MODULES = {
     "CodeLlama-7b-Instruct-hf": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
     "DeepSeek-Coder-V2-Lite-Instruct ": [""],
 }
+
+
+class CustomDataCollatorForCompletionOnlyLM(DataCollatorForCompletionOnlyLM):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
+        batch = super().torch_call(examples)
+
+        # ensure the last tokens is taken into account for loss computation
+        # otherwise the model may never stop generating at inference
+        batch["labels"][:, -1] = self.tokenizer.eos_token_id
+
+        return batch
 
 
 def get_gpu_memory_usage():

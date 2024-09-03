@@ -38,7 +38,7 @@ def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None):
         "do_sample": args.do_sample,
         "temperature": args.temperature,
         "top_p": args.top_p,
-        "top_k": args.top_k
+        "top_k": args.top_k,
     }
 
     with (Progress(
@@ -65,12 +65,7 @@ def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None):
             )
 
             response_ids = outputs[0][tokenized_sample["input_ids"].shape[1]:]
-            response = tokenizer.decode(response_ids, skip_special_tokens=True)
-
-            # postprocess in case the model does not generate EOS token
-            if args.model_name in MODELS_CHAT_USER:
-                response_blocks = response.split(MODELS_CHAT_USER[args.model_name])
-                response = response_blocks[0].strip()
+            response = tokenizer.decode(response_ids, skip_special_tokens=False)
 
             yield response.strip()
 
@@ -117,7 +112,6 @@ def main(args):
     )
     if args.peft_checkpoint_path is not None:
         model = PeftModel.from_pretrained(model, args.peft_checkpoint_path)
-        model = model.merge_and_unload()
     args.model_name = args.model_name_or_path.split("/")[-1]
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
