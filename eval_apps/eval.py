@@ -1,18 +1,20 @@
 import evaluate
 import json
-import time
+import os
+import sys
 
-with open("../runs/deepseek-coder-6.7b-instruct_apps_lora/checkpoint-281/results/responses_apps_t0.2.jsonl", "r") as f:
+input_fp = sys.argv[1]
+output_file_name = sys.argv[2]
+
+base_path = os.path.dirname(input_fp)
+output_fp = os.path.join(base_path, output_file_name)
+
+with open(input_fp, "r") as f:
     responses = [[json.loads(l)["response"]] for l in f]
 
-start = time.time()
-print(start)
-
 apps_metric = evaluate.load('codeparrot/apps_metric', keep_in_memory=True)
-results = apps_metric.compute(predictions=responses, level="all")
+results = apps_metric.compute(predictions=responses, k_list=[1], level="all", debug=False)
 print(results)
 
-end = time.time()
-print(end)
-
-print(f"Total time: {end - start}")
+with open(output_fp, "w") as fout:
+    json.dump(results, fout)

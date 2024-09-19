@@ -33,7 +33,8 @@ class CustomDataCollatorForCompletionOnlyLM(DataCollatorForCompletionOnlyLM):
 
         # ensure the last tokens is taken into account for loss computation
         # otherwise the model may never stop generating at inference
-        batch["labels"][:, -1] = self.tokenizer.eos_token_id
+        if self.tokenizer.padding_side == "left":
+            batch["labels"][:, -1] = batch["input_ids"][:, -1]
 
         return batch
 

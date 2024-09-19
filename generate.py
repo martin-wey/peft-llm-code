@@ -2,13 +2,16 @@ import argparse
 import json
 import os
 
+import anthropic
 import evaluate
 import torch
 from langchain.docstore.document import Document as LangchainDocument
 from langchain_community.vectorstores import FAISS
 from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_huggingface import HuggingFaceEmbeddings
+from openai import OpenAI
 from peft import PeftModel
+from ragatouille import RAGPretrainedModel
 from rich.progress import MofNCompleteColumn, BarColumn, Progress, TextColumn, TimeElapsedColumn
 from tqdm import tqdm
 from transformers import set_seed, AutoModelForCausalLM, AutoTokenizer
@@ -17,10 +20,18 @@ from datasets import load_from_disk
 from utils import track_gpu_usage
 
 
-def prepare_input(sample, knowledge_base_vectors, args):
+def prepare_input(sample, knowledge_base_vectors, reranker, args):
     if args.use_rag:
         query = sample[args.instruction_field]
-        retrieved_docs = knowledge_base_vectors.similarity_search(query=query, k=args.rag_top_k)
+        retrieved_docs = knowledge_base_vectors.similarity_search(query=query, k=args.rag_n_retrieve)
+
+        if args.use_reranking:
+            docs = [doc.page_content for doc in retrieved_docs]
+            docs_scores = reranker.rerank(query, docs, k=args.rag_n_retrieve)
+            result_index = [doc["result_index"] for doc in docs_scores]
+            retrieved_docs = [retrieved_docs[i] for i in result_index[:args.rag_n_final]]
+        else:
+            retrieved_docs = retrieved_docs[:args.rag_n_final]
 
         chat_docs = []
         for doc in retrieved_docs:
@@ -32,8 +43,37 @@ def prepare_input(sample, knowledge_base_vectors, args):
     return sample["messages"][:-1]
 
 
+def add_system_prompt(messages, args):
+    base_system_prompt = ("You are an expert Python programmer and you solve coding problems using Python. "
+                          "Do NOT include explanations and delimiters for your code. ")
+
+    if args.dataset_name == "mbpp":
+        base_system_prompt += "You are given example test cases from which you can infer the function signature."
+    elif args.dataset_name == "apps":
+        base_system_prompt += "Make sure the solution obeys the constraints and passes the example test cases."
+    elif args.dataset_name == "conala":
+        base_system_prompt += "Your solution should most likely contain a single line of code, or only a few ones."
+
+    messages.insert(0, {
+        "role": "system",
+        "content": base_system_prompt
+    })
+
+    return messages
+
+
+def sanitize_response(response):
+    if response.startswith("```python") and response.endswith("```"):
+        return response[len("```python"): -len("```")].strip()
+
+    if response.startswith("`") and response.endswith("`"):
+        return response[1:-1].strip()
+
+    return response
+
+
 @track_gpu_usage
-def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None):
+def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None, reranker=None):
     gen_kwargs = {
         "do_sample": args.do_sample,
         "temperature": args.temperature,
@@ -49,73 +89,87 @@ def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None):
             TimeElapsedColumn(),
     ) as p):
         for sample in p.track(dataset):
-            example = prepare_input(sample, knowledge_base_vectors, args)
+            messages = prepare_input(sample, knowledge_base_vectors, reranker, args)
+            messages = add_system_prompt(messages, args)
+            if not args.api_model:
+                inputs = tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    return_tensors="pt",
+                    return_dict=True
+                ).to(model.device)
 
-            inputs = tokenizer.apply_chat_template(
-                example,
-                add_generation_prompt=True,
-                return_tensors="pt",
-                return_dict=True
-            ).to(model.device)
+                outputs = model.generate(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    max_new_tokens=args.max_new_tokens,
+                    **gen_kwargs
+                )
 
-            outputs = model.generate(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                max_new_tokens=args.max_new_tokens,
-                **gen_kwargs
-            )
-
-            response_ids = outputs[0][inputs["input_ids"].shape[1]:]
-            response = tokenizer.decode(response_ids, skip_special_tokens=False)
-            print(response.strip())
-            yield response.strip()
+                response_ids = outputs[0][inputs["input_ids"].shape[1]:]
+                response = tokenizer.decode(response_ids, skip_special_tokens=True).strip()
+                response = sanitize_response(response)
+            else:
+                if isinstance(model, OpenAI):
+                    response = model.chat.completions.create(
+                        model=args.model_name_or_path,
+                        messages=messages,
+                        max_tokens=args.max_new_tokens,
+                        temperature=args.temperature
+                    )
+                    response = response.choices[0].message.content
+                elif isinstance(model, anthropic.Anthropic):
+                    pass
+            print(response)
+            print("-" * 25)
+            yield response
 
 
 def compute_metrics(args, responses, dataset):
-    if args.dataset_name == "apps":
-        """
-        @todo: fix pyext and Python 3.12 --> try downgrading to 3.11
+    chrf = evaluate.load("chrf")
+    em = evaluate.load("exact_match")
 
-        responses = [[resp] for resp in responses]
-        apps_metric = evaluate.load('codeparrot/apps_metric')
-        metrics = apps_metric.compute(predictions=responses, level="all")
-        print(f"APPs: {metrics}")
-        """
-        return {}
-    else:
-        chrf = evaluate.load("chrf")
-        em = evaluate.load("exact_match")
+    references = dataset[args.reference_field]
+    results_em = em.compute(predictions=responses, references=references)
 
-        references = dataset[args.reference_field]
-        results_em = em.compute(predictions=responses, references=references)
+    references_chrf = [[ref] for ref in references]
+    results_chrf = chrf.compute(predictions=responses, references=references_chrf)
+    results_chrf2 = chrf.compute(predictions=responses, references=references_chrf, word_order=2)
 
-        references_chrf = [[ref] for ref in references]
-        results_chrf = chrf.compute(predictions=responses, references=references_chrf)
-        results_chrf2 = chrf.compute(predictions=responses, references=references_chrf, word_order=2)
+    print(f"EM: {results_em}")
+    print(f"chrF: {results_chrf}")
+    print(f"chrF++: {results_chrf2}")
 
-        print(f"EM: {results_em}")
-        print(f"chrF: {results_chrf}")
-        print(f"chrF++: {results_chrf2}")
-
-        return {
-            "em": results_em,
-            "chrf": results_chrf,
-            "chrf2": results_chrf2
-        }
+    return {
+        "em": results_em,
+        "chrf": results_chrf,
+        "chrf2": results_chrf2
+    }
 
 
 def main(args):
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_name_or_path,
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
-        device_map="auto"
-    )
-    if args.peft_checkpoint_path is not None:
-        model = PeftModel.from_pretrained(model, args.peft_checkpoint_path)
-    args.model_name = args.model_name_or_path.split("/")[-1]
+    if not args.api_model:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_name_or_path,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+            device_map="auto"
+        )
+        if args.peft_checkpoint_path is not None:
+            model = PeftModel.from_pretrained(model, args.peft_checkpoint_path)
+        args.model_name = args.model_name_or_path.split("/")[-1]
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+    else:
+        if "deepseek" in args.model_name_or_path:
+            model = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
+        elif "claude" in args.model_name_or_path:
+            model = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        else:
+            model = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        tokenizer = None
+        args.model_name = args.model_name_or_path
+
     dataset = load_from_disk(args.dataset_name_or_path)["test"]
     args.dataset_name = args.dataset_name_or_path.split("/")[-1]
 
@@ -123,16 +177,17 @@ def main(args):
         args.max_new_tokens = 128
         args.instruction_field = "nl"
         args.reference_field = "cmd"
-    elif args.dataset_name == "codealpaca":
-        args.max_new_tokens = 512
-        args.instruction_field = "prompt"
-        args.reference_field = "completion"
+    elif args.dataset_name == "mbpp":
+        args.max_new_tokens = 256
+        args.instruction_field = "text"
+        args.reference_field = "code"
     else:
         args.max_new_tokens = 1024
         args.instruction_field = "question"
         args.reference_field = "solutions"
 
     knowledge_base_vectors = None
+    reranker = None
     if args.use_icl:
         examples = (
             load_from_disk(args.dataset_name_or_path)["train"]
@@ -158,6 +213,7 @@ def main(args):
         dataset = dataset.map(add_icl_prompt, num_proc=16)
     elif args.use_rag:
         examples = load_from_disk(args.dataset_name_or_path)["train"]
+        # @todo: special case for APPs
         knowledge_base = [
             LangchainDocument(
                 page_content=sample[args.instruction_field],
@@ -172,21 +228,26 @@ def main(args):
             encode_kwargs={"normalize_embeddings": True},  # Set `True` for cosine similarity
         )
 
+        if args.use_reranking:
+            reranker = RAGPretrainedModel.from_pretrained(args.reranking_model)
+
         knowledge_base_vectors = FAISS.from_documents(
             knowledge_base, embedding_model, distance_strategy=DistanceStrategy.COSINE
         )
 
     responses, init_gpu_memory, peak_gpu_memory, total_execution_time = (
-        generate(args, dataset, model, tokenizer, knowledge_base_vectors)
+        generate(args, dataset, model, tokenizer, knowledge_base_vectors, reranker)
     )
 
-    metrics = compute_metrics(args, responses, dataset)
     metrics = {
-        **metrics,
         "init_gpu_memory": f"{init_gpu_memory} MB",
         "peak_gpu_memory": f"{peak_gpu_memory} MB",
         "total_execution_time": f"{total_execution_time} seconds"
     }
+
+    if args.dataset_name == "conala":
+        conala_metrics = compute_metrics(args, responses, dataset)
+        metrics = {**metrics, **conala_metrics}
 
     output_dir = (
         f"{args.peft_checkpoint_path}/results" if args.peft_checkpoint_path else f"runs/{args.model_name}/results"
@@ -197,15 +258,17 @@ def main(args):
     if args.use_icl:
         file_suffix += f"_icl_n{args.num_icl_examples}_s{args.icl_seed}"
     elif args.use_rag:
-        file_suffix += f"_rag_k{args.rag_top_k}"
+        file_suffix += "_rag"
+        if args.use_reranking:
+            file_suffix += "_reranking"
+        file_suffix += f"_n{args.rag_n_final}"
 
     with open(f"{output_dir}/metrics_{file_suffix}.jsonl", "w") as fout:
         json.dump(metrics, fout)
 
-    with open(f"{output_dir}/responses_{file_suffix}.jsonl", "w") as fout:
-        for response in responses:
-            json.dump({"response": response}, fout)
-            fout.write("\n")
+    data = [[response] for response in responses]
+    with open(f"{output_dir}/responses_{file_suffix}.json", "w") as fout:
+        json.dump(data, fout)
 
 
 if __name__ == "__main__":
@@ -213,6 +276,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name_or_path", type=str, default=None)
     parser.add_argument("--peft_checkpoint_path", type=str, default=None)
     parser.add_argument("--dataset_name_or_path", type=str, default=None)
+    parser.add_argument("--api_model", action="store_true", default=False)
 
     parser.add_argument("--do_sample", default=True, type=bool, help="do sampling in generation")
     parser.add_argument("--temperature", default=0.2, type=float, help="temperature for sampling")
@@ -225,7 +289,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--use_rag", action="store_true", default=False)
     parser.add_argument("--rag_encoder_model", default="thenlper/gte-small", type=str)
-    parser.add_argument("--rag_top_k", default=1, type=int)
+    parser.add_argument("--rag_n_retrieve", default=1, type=int)
+    parser.add_argument("--rag_n_final", default=1, type=int)
+    parser.add_argument("--use_reranking", action="store_true", default=False)
+    parser.add_argument("--reranking_model", default="colbert-ir/colbertv2.0", type=str)
 
     args = parser.parse_args()
     set_seed(42)
