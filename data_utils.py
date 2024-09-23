@@ -2,48 +2,39 @@ import json
 
 from datasets import load_dataset, DatasetDict
 
-
-def transform_mbpp(output_dir="datasets"):
-    dataset = load_dataset("google-research-datasets/mbpp")
-
-    def process_example(e):
-        prompt = f"{e['text']} Your code should pass these tests:"
-        for test in e["test_list"]:
-            prompt += f"\n{test}"
-        messages = [
-            {
-                "role": "user",
-                "content": prompt
-            },
-            {
-                "role": "assistant",
-                "content": e["code"]
-            }
-        ]
-        return {"messages": messages}
-
-    dataset = dataset.map(process_example, num_proc=8)
-    dataset.save_to_disk(f"{output_dir}/mbpp")
+from utils import make_chat_template_prompt, INSTRUCTION_PREFIX
 
 
 def transform_conala(output_dir="datasets"):
-    dataset = load_dataset("neulab/docprompting-conala")
+    dataset = load_dataset("neulab/docprompting-conala", trust_remote_code=True)
+    instruction_prefix = INSTRUCTION_PREFIX["conala"]
 
-    def process_example(e):
-        messages = [
-            {
-                "role": "user",
-                "content": e["nl"]
-            },
-            {
-                "role": "assistant",
-                "content": e["cmd"]
-            }
-        ]
+    def process_example(e, split):
+        user_content = e["nl"]
+        assistant_content = None if split == "test" else e["cmd"]
+        messages = make_chat_template_prompt(user_content, assistant_content, instruction_prefix)
         return {"messages": messages}
 
-    dataset = dataset.map(process_example, num_proc=8)
+    for split in dataset.keys():
+        dataset[split] = dataset[split].map(lambda e: process_example(e, split), num_proc=8)
     dataset.save_to_disk(f"{output_dir}/conala")
+
+
+def transform_mbpp(output_dir="datasets"):
+    dataset = load_dataset("google-research-datasets/mbpp", trust_remote_code=True)
+    instruction_prefix = INSTRUCTION_PREFIX["mbpp"]
+
+    def process_example(e, split):
+        user_content = f"{e['text']} Your code should pass these tests:"
+        for test in e["test_list"]:
+            user_content += f"\n{test}"
+        assistant_content = None if split == "test" else e["code"]
+        messages = make_chat_template_prompt(user_content, assistant_content, instruction_prefix)
+        return {"messages": messages}
+
+    for split in dataset.keys():
+        dataset[split] = dataset[split].map(lambda e: process_example(e, split), num_proc=8)
+    dataset.save_to_disk(f"{output_dir}/mbpp")
 
 
 def transform_apps(output_dir="datasets"):
@@ -52,8 +43,9 @@ def transform_apps(output_dir="datasets"):
     # https://huggingface.co/spaces/codeparrot/apps_metric/blob/main/example_script.py
 
     dataset = load_dataset("codeparrot/apps", trust_remote_code=True)
+    instruction_prefix = INSTRUCTION_PREFIX["apps"]
 
-    def process_example(e):
+    def process_example(e, split):
         starter_code = None if len(e["starter_code"]) == 0 else e["starter_code"]
         try:
             input_outpout = json.loads(e["input_output"])
@@ -65,24 +57,15 @@ def transform_apps(output_dir="datasets"):
         except ValueError:
             solutions = [""]
 
-        _input = e["question"]
+        user_content = e["question"]
         if starter_code:
-            _input += starter_code
+            user_content += starter_code
         if fn_name:
-            _input += "\nUse Standard Input format\n"
+            user_content += "\nUse Standard Input format\n"
         else:
-            _input += "\nUse Call-Based format\n"
-
-        messages = [
-            {
-                "role": "user",
-                "content": _input
-            },
-            {
-                "role": "assistant",
-                "content": solutions[0]
-            }
-        ]
+            user_content += "\nUse Call-Based format\n"
+        assistant_content = None if split == "test" else solutions[0]
+        messages = make_chat_template_prompt(user_content, assistant_content, instruction_prefix)
         return {"messages": messages}
 
     # create validation set
@@ -95,11 +78,12 @@ def transform_apps(output_dir="datasets"):
         "test": dataset["test"]
     })
 
-    dataset = dataset.map(process_example, num_proc=8)
+    for split in dataset.keys():
+        dataset[split] = dataset[split].map(lambda e: process_example(e, split), num_proc=8)
     dataset.save_to_disk(f"{output_dir}/apps")
 
 
 if __name__ == "__main__":
-    # transform_conala()
-    # transform_apps()
+    transform_conala()
     transform_mbpp()
+    transform_apps()

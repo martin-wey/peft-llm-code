@@ -7,12 +7,11 @@ from typing import Optional, List, Union, Any, Dict
 
 import torch
 from transformers import AutoTokenizer
-from trl import is_peft_available, DataCollatorForCompletionOnlyLM
+from trl import DataCollatorForCompletionOnlyLM
 from trl.core import flatten_dict
 
-if is_peft_available():
-    from peft import LoraConfig, PeftConfig, PromptEncoderConfig, PromptTuningConfig, \
-        PromptTuningInit
+from peft import LoraConfig, PeftConfig, PromptEncoderConfig, PromptTuningConfig, \
+    PromptTuningInit
 
 
 LORA_TARGET_MODULES = {
@@ -20,8 +19,44 @@ LORA_TARGET_MODULES = {
     "deepseek-coder-6.7b-instruct": ["q_proj", "v_proj", "o_proj", "k_proj"],
     "CodeQwen1.5-7B-Chat": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
     "Meta-Llama-3.1-8B-Instruct": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
-    "DeepSeek-Coder-V2-Lite-Instruct ": [""],
+    "Qwen2.5-Coder-7B-Instruct": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
 }
+
+_MAGIC_SPLITTER_ = "-[[]]-this-is-really-our-highest-priority-[[]]-"
+
+INSTRUCTION_PREFIX = {
+    "conala": (
+        "Provide a self-contained Python script that solves the following problem in a markdown code block. "
+        "Your solution should most likely contain a single line of code, or only a few ones."
+    ),
+    "mbpp": (
+        "Provide a self-contained Python script that solves the following problem in a markdown code block. "
+        "You are given example test cases from which you can infer the function signature."
+    ),
+    "apps": (
+        "Provide a self-contained Python script that solves the following problem in a markdown code block. "
+        "Make sure the solution obeys the constraints and passes the example test cases."
+    )
+}
+
+
+def encode_chat_template(chat_template, tokenizer):
+    prompt = tokenizer.apply_chat_template(chat_template, tokenize=False).split(_MAGIC_SPLITTER_)[0]
+    return tokenizer.encode(prompt, return_tensors="pt")
+
+
+def make_chat_template_prompt(instruction, response, instruction_prefix):
+    # https://github.com/evalplus/evalplus/blob/master/evalplus/provider/utility.py#L25
+    user_content = f"{instruction_prefix}\n```\n{instruction.strip()}\n```"
+    if response is None:
+        assistant_content = f"```python\n{_MAGIC_SPLITTER_}\n```"
+    else:
+        assistant_content = f"```python\n{response.strip()}\n```"
+
+    return [
+        {"role": "user", "content": user_content},
+        {"role": "assistant", "content": assistant_content}
+    ]
 
 
 class CustomDataCollatorForCompletionOnlyLM(DataCollatorForCompletionOnlyLM):
@@ -30,11 +65,6 @@ class CustomDataCollatorForCompletionOnlyLM(DataCollatorForCompletionOnlyLM):
 
     def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
         batch = super().torch_call(examples)
-
-        # ensure the last tokens is taken into account for loss computation
-        # otherwise the model may never stop generating at inference
-        if self.tokenizer.padding_side == "left":
-            batch["labels"][:, -1] = batch["input_ids"][:, -1]
 
         return batch
 
@@ -210,6 +240,10 @@ class ModelConfig:
         default=128,
         metadata={"help": ("Encoder hidden size for p-tuning.")},
     )
+    active_gpu: int = field(
+        default=-1,
+        metadata={"help": ("The index of the active GPU used for training.")}
+    )
 
     def to_dict(self):
         output_dict = {}
@@ -228,12 +262,6 @@ class ModelConfig:
 def get_peft_config(model_config: ModelConfig, tokenizer: AutoTokenizer) -> "Optional[PeftConfig]":
     if model_config.use_peft is False:
         return None
-
-    if not is_peft_available():
-        raise ValueError(
-            "You need to have PEFT library installed in your environment, make sure to install `peft`. "
-            "Make sure to run `pip install -U peft`."
-        )
 
     model_name = model_config.model_name_or_path.split("/")[-1]
 

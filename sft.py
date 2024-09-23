@@ -11,7 +11,9 @@ from trl import (
     SFTTrainer,
     SFTConfig,
     get_quantization_config,
-    get_kbit_device_map, RichProgressCallback
+    get_kbit_device_map,
+    RichProgressCallback,
+    DataCollatorForCompletionOnlyLM
 )
 from trl.commands.cli_utils import init_zero_verbose, TrlParser
 
@@ -19,8 +21,7 @@ from datasets import load_from_disk
 from utils import (
     SFTScriptArguments,
     ModelConfig,
-    get_peft_config,
-    CustomDataCollatorForCompletionOnlyLM
+    get_peft_config
 )
 
 init_zero_verbose()
@@ -62,8 +63,7 @@ if __name__ == "__main__":
     collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
     if args.completion_only:
         # ensures the instruction is ignored during loss computation
-        response_template = args.response_template
-        collator = CustomDataCollatorForCompletionOnlyLM(response_template, tokenizer=tokenizer)
+        collator = DataCollatorForCompletionOnlyLM(args.response_template, tokenizer=tokenizer)
 
     trainer = SFTTrainer(
         model=model_config.model_name_or_path,
@@ -75,10 +75,9 @@ if __name__ == "__main__":
         peft_config=get_peft_config(model_config, tokenizer),
         callbacks=[RichProgressCallback()]
     )
-
+    """
     train_dataloader = trainer.get_train_dataloader()
 
-    """
     for i, batch in enumerate(train_dataloader):
         input_ids = batch["input_ids"][1]
         labels = batch["labels"][1]
@@ -87,9 +86,11 @@ if __name__ == "__main__":
         print(batch["attention_mask"][1])
         print(tokenizer.decode(input_ids))
         break
-
     """
-    console.print(model_config)
-    trainer.model.print_trainable_parameters()
 
     trainer.train()
+
+    console.log(model_config)
+    trainable_params, all_param = trainer.model.get_nb_trainable_parameters()
+    console.log(f"trainable params: {trainable_params:,d} || "
+                f"all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.4f}")

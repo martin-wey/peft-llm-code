@@ -10,14 +10,14 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_huggingface import HuggingFaceEmbeddings
 from openai import OpenAI
-from peft import PeftModel
+from peft import PeftModelForCausalLM
 from ragatouille import RAGPretrainedModel
 from rich.progress import MofNCompleteColumn, BarColumn, Progress, TextColumn, TimeElapsedColumn
 from tqdm import tqdm
-from transformers import set_seed, AutoModelForCausalLM, AutoTokenizer
+from transformers import set_seed, AutoModelForCausalLM, AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 
 from datasets import load_from_disk
-from utils import track_gpu_usage
+from utils import track_gpu_usage, make_chat_template_prompt, encode_chat_template, INSTRUCTION_PREFIX
 
 
 def prepare_input(sample, knowledge_base_vectors, reranker, args):
@@ -35,41 +35,24 @@ def prepare_input(sample, knowledge_base_vectors, reranker, args):
 
         chat_docs = []
         for doc in retrieved_docs:
-            chat_docs += [
-                {"role": "user", "content": doc.page_content},
-                {"role": "assistant", "content": doc.metadata["code"]}
-            ]
-        return chat_docs + sample["messages"][:-1]
-    return sample["messages"][:-1]
+            chat_docs += make_chat_template_prompt(
+                doc.page_content,
+                doc.metadata["code"],
+                instruction_prefix=INSTRUCTION_PREFIX[args.dataset_name],
+            )
+        return chat_docs + sample["messages"]
+    return sample["messages"]
 
 
-def add_system_prompt(messages, args):
-    base_system_prompt = ("You are an expert Python programmer and you solve coding problems using Python. "
-                          "Do NOT include explanations and delimiters for your code. ")
+class CustomStoppingCriteria(StoppingCriteria):
+    def __init__(self, start, eos_tokens, tokenizer):
+        self.start = start
+        self.eos_tokens = eos_tokens
+        self.tokenizer = tokenizer
 
-    if args.dataset_name == "mbpp":
-        base_system_prompt += "You are given example test cases from which you can infer the function signature."
-    elif args.dataset_name == "apps":
-        base_system_prompt += "Make sure the solution obeys the constraints and passes the example test cases."
-    elif args.dataset_name == "conala":
-        base_system_prompt += "Your solution should most likely contain a single line of code, or only a few ones."
-
-    messages.insert(0, {
-        "role": "system",
-        "content": base_system_prompt
-    })
-
-    return messages
-
-
-def sanitize_response(response):
-    if response.startswith("```python") and response.endswith("```"):
-        return response[len("```python"): -len("```")].strip()
-
-    if response.startswith("`") and response.endswith("`"):
-        return response[1:-1].strip()
-
-    return response
+    def __call__(self, input_ids, scores, **kwargs):
+        tokens = self.tokenizer.decode(input_ids[0, self.start:])
+        return any([eos_token in tokens for eos_token in self.eos_tokens])
 
 
 @track_gpu_usage
@@ -90,25 +73,17 @@ def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None, reran
     ) as p):
         for sample in p.track(dataset):
             messages = prepare_input(sample, knowledge_base_vectors, reranker, args)
-            messages = add_system_prompt(messages, args)
             if not args.api_model:
-                inputs = tokenizer.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    return_tensors="pt",
-                    return_dict=True
-                ).to(model.device)
-
+                inputs = encode_chat_template(messages, tokenizer).to(model.device)
                 outputs = model.generate(
-                    input_ids=inputs["input_ids"],
-                    attention_mask=inputs["attention_mask"],
+                    inputs,
                     max_new_tokens=args.max_new_tokens,
+                    stopping_criteria=[CustomStoppingCriteria(inputs.shape[1], args.eos, tokenizer)],
                     **gen_kwargs
                 )
-
-                response_ids = outputs[0][inputs["input_ids"].shape[1]:]
-                response = tokenizer.decode(response_ids, skip_special_tokens=True).strip()
-                response = sanitize_response(response)
+                response_ids = outputs[0][inputs.shape[1]:]
+                response = tokenizer.decode(response_ids, skip_special_tokens=True)
+                response = response.split("```")[0].strip()
             else:
                 if isinstance(model, OpenAI):
                     response = model.chat.completions.create(
@@ -156,10 +131,11 @@ def main(args):
             device_map="auto"
         )
         if args.peft_checkpoint_path is not None:
-            model = PeftModel.from_pretrained(model, args.peft_checkpoint_path)
+            model = PeftModelForCausalLM.from_pretrained(model, args.peft_checkpoint_path)
         args.model_name = args.model_name_or_path.split("/")[-1]
 
         tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+        args.eos = [tokenizer.eos_token, "\n```\n"]
     else:
         if "deepseek" in args.model_name_or_path:
             model = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
@@ -178,13 +154,14 @@ def main(args):
         args.instruction_field = "nl"
         args.reference_field = "cmd"
     elif args.dataset_name == "mbpp":
-        args.max_new_tokens = 256
+        args.max_new_tokens = 512
         args.instruction_field = "text"
         args.reference_field = "code"
     else:
         args.max_new_tokens = 1024
         args.instruction_field = "question"
         args.reference_field = "solutions"
+        args.eos += ["\ndef main(", "\nif __name__"]
 
     knowledge_base_vectors = None
     reranker = None
@@ -200,10 +177,11 @@ def main(args):
                 reference = json.loads(example[args.reference_field])[0]
             else:
                 reference = example[args.reference_field]
-            chat_exemple = [
-                {"role": "user", "content": example[args.instruction_field]},
-                {"role": "assistant", "content": reference},
-            ]
+            chat_exemple = make_chat_template_prompt(
+                example[args.instruction_field],
+                reference,
+                instruction_prefix=INSTRUCTION_PREFIX[args.dataset_name],
+            )
             chat_icl += chat_exemple
 
         def add_icl_prompt(example):
@@ -225,7 +203,7 @@ def main(args):
             model_name=args.rag_encoder_model,
             multi_process=False,
             model_kwargs={"device": "cuda"},
-            encode_kwargs={"normalize_embeddings": True},  # Set `True` for cosine similarity
+            encode_kwargs={"normalize_embeddings": True},
         )
 
         if args.use_reranking:
