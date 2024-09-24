@@ -22,6 +22,6 @@ for difficulty_responses, difficulty in [(interview_responses, "interview"),
     results = apps_metric.compute(predictions=difficulty_responses, level=difficulty, debug=False, count_errors=True)
     print(results)
 
-    output_fp = os.path.join(base_path, f"apps_metrics_{difficulty}.json")
+    output_fp = os.path.join(base_path, f"apps_metrics_{difficulty}_icl_n3.json")
     with open(output_fp, "w") as fout:
         json.dump(results, fout)

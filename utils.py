@@ -10,8 +10,14 @@ from transformers import AutoTokenizer
 from trl import DataCollatorForCompletionOnlyLM
 from trl.core import flatten_dict
 
-from peft import LoraConfig, PeftConfig, PromptEncoderConfig, PromptTuningConfig, \
-    PromptTuningInit
+from peft import (
+    LoraConfig,
+    PeftConfig,
+    PromptEncoderConfig,
+    PromptTuningConfig,
+    PromptTuningInit,
+    PrefixTuningConfig
+)
 
 
 LORA_TARGET_MODULES = {
@@ -42,7 +48,7 @@ INSTRUCTION_PREFIX = {
 
 def encode_chat_template(chat_template, tokenizer):
     prompt = tokenizer.apply_chat_template(chat_template, tokenize=False).split(_MAGIC_SPLITTER_)[0]
-    return tokenizer.encode(prompt, return_tensors="pt")
+    return tokenizer(prompt, return_attention_mask=True, return_tensors="pt")
 
 
 def make_chat_template_prompt(instruction, response, instruction_prefix):
@@ -181,10 +187,6 @@ class ModelConfig:
         default=False,
         metadata={"help": ("Whether to use LoRA.")},
     )
-    use_dora: bool = field(
-        default=False,
-        metadata={"help": ("Whether to use DoRA.")},
-    )
     lora_r: Optional[int] = field(
         default=16,
         metadata={"help": ("LoRA R value.")},
@@ -267,7 +269,6 @@ def get_peft_config(model_config: ModelConfig, tokenizer: AutoTokenizer) -> "Opt
 
     if model_config.use_lora:
         peft_config = LoraConfig(
-            use_dora=model_config.use_dora,
             r=model_config.lora_r,
             lora_alpha=model_config.lora_alpha,
             lora_dropout=model_config.lora_dropout,
@@ -283,13 +284,18 @@ def get_peft_config(model_config: ModelConfig, tokenizer: AutoTokenizer) -> "Opt
             encoder_hidden_size=model_config.encoder_hidden_size,
         )
     elif model_config.use_prompt_tuning:
-        prompt_tuning_init_text = "Generate a response given a natural language instruction.\n"
+        prompt_tuning_init_text = "Generate a Python code that solves the given problem.\n"
         peft_config = PromptTuningConfig(
             task_type=model_config.task_type,
             prompt_tuning_init=PromptTuningInit.TEXT,
             num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),
             prompt_tuning_init_text=prompt_tuning_init_text,
             tokenizer_name_or_path=model_config.model_name_or_path,
+        )
+    elif model_config.use_prefix_tuning:
+        peft_config = PrefixTuningConfig(
+            task_type=model_config.task_type,
+            num_virtual_tokens=model_config.num_virtual_tokens
         )
     else:
         peft_config = None

@@ -74,14 +74,16 @@ def generate(args, dataset, model, tokenizer, knowledge_base_vectors=None, reran
         for sample in p.track(dataset):
             messages = prepare_input(sample, knowledge_base_vectors, reranker, args)
             if not args.api_model:
-                inputs = encode_chat_template(messages, tokenizer).to(model.device)
+                inputs = encode_chat_template(messages, tokenizer)
+                inputs = {k: v.to(model.device) for k, v in inputs.items()}
                 outputs = model.generate(
-                    inputs,
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
                     max_new_tokens=args.max_new_tokens,
-                    stopping_criteria=[CustomStoppingCriteria(inputs.shape[1], args.eos, tokenizer)],
+                    stopping_criteria=[CustomStoppingCriteria(inputs["input_ids"].shape[1], args.eos, tokenizer)],
                     **gen_kwargs
                 )
-                response_ids = outputs[0][inputs.shape[1]:]
+                response_ids = outputs[0][inputs["input_ids"].shape[1]:]
                 response = tokenizer.decode(response_ids, skip_special_tokens=True)
                 response = response.split("```")[0].strip()
             else:
