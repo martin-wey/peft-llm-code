@@ -4,6 +4,8 @@ import os
 import sys
 
 input_fp = sys.argv[1]
+method = sys.argv[2]
+n = sys.argv[3]
 base_path = os.path.dirname(input_fp)
 
 with open(input_fp, "r") as f:
@@ -22,6 +24,7 @@ for difficulty_responses, difficulty in [(interview_responses, "interview"),
     results = apps_metric.compute(predictions=difficulty_responses, level=difficulty, debug=False, count_errors=True)
     print(results)
 
-    output_fp = os.path.join(base_path, f"apps_metrics_{difficulty}_icl_n3.json")
+    output_fp = os.path.join(base_path, f"apps_metrics_{difficulty}_{method}_n{n}.json")
+    # output_fp = os.path.join(base_path, f"apps_metrics_{difficulty}.json")
     with open(output_fp, "w") as fout:
         json.dump(results, fout)

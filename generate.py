@@ -163,7 +163,6 @@ def main(args):
         args.max_new_tokens = 1024
         args.instruction_field = "question"
         args.reference_field = "solutions"
-        args.eos += ["\ndef main(", "\nif __name__"]
 
     knowledge_base_vectors = None
     reranker = None

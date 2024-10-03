@@ -75,19 +75,20 @@ if __name__ == "__main__":
         peft_config=get_peft_config(model_config, tokenizer),
         callbacks=[RichProgressCallback()]
     )
+
     """
     train_dataloader = trainer.get_train_dataloader()
 
     for i, batch in enumerate(train_dataloader):
-        input_ids = batch["input_ids"][1]
-        labels = batch["labels"][1]
+        input_ids = batch["input_ids"][3]
+        labels = batch["labels"][3]
         print(input_ids)
         print(labels)
-        print(batch["attention_mask"][1])
+        print(batch["attention_mask"][3])
         print(tokenizer.decode(input_ids))
         break
-    """
 
+    """
     trainer.train()
 
     console.log(model_config)

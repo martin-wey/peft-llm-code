@@ -5,6 +5,29 @@ from datasets import load_dataset, DatasetDict
 from utils import make_chat_template_prompt, INSTRUCTION_PREFIX
 
 
+def transform_magicoder(output_dir="datasets"):
+    dataset = load_dataset("ise-uiuc/Magicoder-Evol-Instruct-110K")
+
+    def process_example(e):
+        messages = [
+            {"role": "user", "content": e["instruction"]},
+            {"role": "assistant", "content": e["response"]}
+        ]
+        return {"messages": messages}
+
+    train_set = dataset["train"].shuffle(42)
+    validation_set = train_set.select(range(1000))
+    train_set = train_set.select(range(1000, len(train_set)))
+    dataset = DatasetDict({
+        "train": train_set,
+        "validation": validation_set,
+    })
+
+    for split in dataset.keys():
+        dataset[split] = dataset[split].map(lambda e: process_example(e), num_proc=8)
+    dataset.save_to_disk(f"{output_dir}/magicoder")
+
+
 def transform_conala(output_dir="datasets"):
     dataset = load_dataset("neulab/docprompting-conala", trust_remote_code=True)
     instruction_prefix = INSTRUCTION_PREFIX["conala"]
@@ -84,6 +107,7 @@ def transform_apps(output_dir="datasets"):
 
 
 if __name__ == "__main__":
-    transform_conala()
-    transform_mbpp()
-    transform_apps()
+    transform_magicoder()
+    # transform_conala()
+    # transform_mbpp()
+    # transform_apps()
