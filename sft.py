@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 from rich.console import Console
 from rich.logging import RichHandler
 from tqdm.rich import tqdm
@@ -81,11 +82,11 @@ if __name__ == "__main__":
 
     for i, batch in enumerate(train_dataloader):
         input_ids = batch["input_ids"][3]
-        labels = batch["labels"][3]
-        print(input_ids)
-        print(labels)
-        print(batch["attention_mask"][3])
+        labels = batch["labels"][3].cpu()
+        labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
         print(tokenizer.decode(input_ids))
+        print("-" * 100)
+        print(tokenizer.decode(labels))
         break
 
     """

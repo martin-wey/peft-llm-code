@@ -28,6 +28,29 @@ def transform_magicoder(output_dir="datasets"):
     dataset.save_to_disk(f"{output_dir}/magicoder")
 
 
+def transform_magicoder_oss(output_dir="datasets"):
+    dataset = load_dataset("ise-uiuc/Magicoder-OSS-Instruct-75K")
+
+    def process_example(e):
+        messages = [
+            {"role": "user", "content": e["problem"]},
+            {"role": "assistant", "content": e["solution"]}
+        ]
+        return {"messages": messages}
+
+    train_set = dataset["train"].shuffle(42)
+    validation_set = train_set.select(range(1000))
+    train_set = train_set.select(range(1000, len(train_set)))
+    dataset = DatasetDict({
+        "train": train_set,
+        "validation": validation_set,
+    })
+
+    for split in dataset.keys():
+        dataset[split] = dataset[split].map(lambda e: process_example(e), num_proc=8)
+    dataset.save_to_disk(f"{output_dir}/magicoder_oss")
+
+
 def transform_conala(output_dir="datasets"):
     dataset = load_dataset("neulab/docprompting-conala", trust_remote_code=True)
     instruction_prefix = INSTRUCTION_PREFIX["conala"]
@@ -107,7 +130,8 @@ def transform_apps(output_dir="datasets"):
 
 
 if __name__ == "__main__":
-    transform_magicoder()
+    transform_magicoder_oss()
+    # transform_magicoder()
     # transform_conala()
     # transform_mbpp()
     # transform_apps()
