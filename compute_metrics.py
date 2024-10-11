@@ -1,8 +1,10 @@
+import argparse
+import codebleu
 import csv
+import glob
 import json
 import os
 import subprocess
-
 from tqdm import tqdm
 
 
@@ -21,14 +23,12 @@ def compute_exact_match(predictions, references, k):
     return accuracy
 
 
-def get_em_metrics(output_fp):
-    predictions = []
-    references = []
-    with open(output_fp, "r", encoding="utf-8") as file:
-        for line in file:
-            json_data = json.loads(line)
-            predictions.append(json_data["predictions"])
-            references.append(json_data["references"])
+def get_em_metrics(predictions_fp, references_fp):
+    with open(predictions_fp, "r") as f:
+        predictions = [json.loads(l) for l in f]
+
+    with open(references_fp, "r") as f:
+        references = [json.loads(l)[0] for l in f]
 
     em_1 = round(compute_exact_match(predictions, references, 1) * 100, 3)
     em_2 = round(compute_exact_match(predictions, references, 2) * 100, 3)
@@ -39,15 +39,39 @@ def get_em_metrics(output_fp):
 
 
 def get_codebleu(predictions_fp, references_fp):
-    os.chdir("evaluator/CodeBLEU")
-    res = subprocess.run(
-        ["python", "calc_code_bleu.py", "--refs", references_fp, "--hyp", predictions_fp, "--lang", "python"],
-        stdout=subprocess.PIPE)
-    codebleu = float(res.stdout.decode("utf-8").strip())
-    os.chdir("../../")
-    return codebleu
+    with open(predictions_fp, "r") as f:
+        predictions = [json.loads(l)[0] for l in f]
+
+    with open(references_fp, "r") as f:
+        references = [json.loads(l)[0] for l in f]
+
+    result = codebleu.calc_codebleu(references, predictions, lang="python")
+    return result["codebleu"]
 
 
+if __name__ == "__main__":
+    dataset = "conala"
+    results_dir = "runs/test_results"
+    references_file = os.path.join(results_dir, "conala_references.jsonl")
+
+    for run_dir in tqdm(os.listdir(results_dir)):
+        print(run_dir)
+        if not os.path.isdir(f"{results_dir}/{run_dir}"):
+            continue
+
+        model_dir = os.path.join(results_dir, run_dir)
+        for file in glob.glob(f"{model_dir}/predictions_{dataset}_icl_n*.jsonl"):
+            n = int(file.split('_n')[1].split('.jsonl')[0])
+            print(f"ICL - n={n}")
+            print(get_em_metrics(file, references_file))
+            codebleu_result = get_codebleu(file, references_file)
+            print(f"CodeBLEU: {codebleu_result}")
+
+        print("-" * 25)
+
+
+
+"""
 if __name__ == "__main__":
     methods = ["joint", "qlora-8bit", "qlora-4bit", "ft", "lora", "ia3", "prompt-tuning", "prefix-tuning"]
     datasets = ["conala", "codealpaca"]
@@ -94,3 +118,4 @@ if __name__ == "__main__":
                     model = run_dir.split(f"_{method}")[0]
                     seed = 42
                     writer.writerow([model, dataset, method, em_1, em_2, em_5, em_10, codebleu, seed])
+"""

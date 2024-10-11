@@ -1,6 +1,6 @@
 import argparse
 import logging
-from pathlib import Path
+import os
 
 import torch
 import wandb
@@ -55,7 +55,6 @@ if __name__ == "__main__":
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--wandb_project_name", default="peft-llm-code", type=str)
     parser.add_argument("--num_workers", default=8, type=int)
-    parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
@@ -70,13 +69,11 @@ if __name__ == "__main__":
     if args.run_name is None:
         if args.do_train:
             args.run_name = f"{args.dataset}/{args.model_name}_{args.tuning_method}"
-        elif args.do_test and "joint" in args.adapter_path:
-            args.run_name = f"{args.model_name}_joint"
         else:
             args.run_name = args.model_name
     run_intermediate_path = "checkpoints" if args.do_train else "test_results"
-    args.run_dir = Path(f"{args.output_dir}/{run_intermediate_path}/{args.run_name}")
-    args.run_dir.mkdir(exist_ok=True)
+    args.run_dir = f"{args.output_dir}/{run_intermediate_path}/{args.run_name}"
+    os.makedirs(args.run_dir, exist_ok=True)
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -86,16 +83,21 @@ if __name__ == "__main__":
     )
 
     if args.use_wandb:
-        wandb.init(project=args.wandb_project_name,
-                   name=args.run_name,
-                   config=vars(args))
+        wandb.init(
+            project=args.wandb_project_name,
+            name=args.run_name,
+            config=vars(args)
+        )
 
     if args.dataset == "conala":
         args.max_input_length = 64
         args.max_target_length = 64
-    else:
+    elif args.dataset == "codealpaca":
         args.max_input_length = 64
         args.max_target_length = 128
+    elif args.dataset == "apps":
+        args.max_seq_length = 2048
+        args.max_target_length = 1024
 
     if args.do_train:
         logger.info(f"[Fine-tuning] Model: {args.model_name_or_path} | Dataset: {args.dataset}.")
