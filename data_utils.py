@@ -32,9 +32,9 @@ def load_apps_train_dataset():
 
 def load_apps_test_dataset():
     dataset = load_dataset("codeparrot/apps", split="test")
-    introductory_set = dataset.filter(lambda sample: sample["difficulty"] == "introductory").select(range(100))
-    interview_set = dataset.filter(lambda sample: sample["difficulty"] == "interview").select(range(100))
-    competition_set = dataset.filter(lambda sample: sample["difficulty"] == "competition").select(range(100))
+    introductory_set = dataset.filter(lambda sample: sample["difficulty"] == "introductory").select(range(250))
+    interview_set = dataset.filter(lambda sample: sample["difficulty"] == "interview").select(range(250))
+    competition_set = dataset.filter(lambda sample: sample["difficulty"] == "competition").select(range(250))
 
     dataset = concatenate_datasets([introductory_set, interview_set, competition_set])
     dataset = dataset.map(preprocess_apps, num_proc=16, load_from_cache_file=False)

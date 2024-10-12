@@ -1,7 +1,7 @@
 import logging
 import math
+import numpy as np
 import random
-
 import wandb
 from transformers import (
     default_data_collator,
@@ -59,13 +59,13 @@ def run_train(args):
         if args.dataset == "apps":
             responses = [random.choice(json.loads(solutions)) for solutions in responses]
             guides = examples["guide"]
-            prompt_template = (
-                "### Instruction:\nWrite a python code to solve the following coding problem that obeys the constraints "
-                "and passes the example test cases. The output code needs to {guide}:\n"
-                "{instruction}\n### Response:\n```python\n{response}\n```"
+            prompt_template_apps = (
+                "[INST] Write a python code to solve the following coding problem that obeys the constraints "
+                "and passes the example test cases. The output code needs to {guide}:\n{instruction}\n[/INST]\n"
+                "```python\n{response}\n```</s>"
             )
             prompts = [
-                prompt_template.format(guide=guide, instruction=instruction, response=response.strip())
+                prompt_template_apps.format(guide=guide, instruction=instruction, response=response.strip())
                 for guide, instruction, response in zip(guides, instructions, responses)
             ]
         else:
@@ -151,6 +151,20 @@ def run_train(args):
         data_collator=collator,
     )
     trainer.add_callback(SaveBestModelCallback(trainer, eval_steps))
+
+    """
+    # check if data is processed properly
+    train_dataloader = trainer.get_train_dataloader()
+
+    for i, batch in enumerate(train_dataloader):
+        input_ids = batch["input_ids"][0]
+        labels = batch["labels"][0].cpu()
+        labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+        print(tokenizer.decode(input_ids))
+        print("-" * 100)
+        print(tokenizer.decode(labels))
+        break
+    """
 
     eval_results = trainer.evaluate()
     logger.info(f"Evaluation loss before training: {round(eval_results['eval_loss'], 4)}")

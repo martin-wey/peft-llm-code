@@ -56,36 +56,31 @@ def run_test(args):
         random_indices = random.sample(range(len(train_dataset)), args.num_icl_examples)
         icl_examples = train_dataset.select(random_indices)
         for example in icl_examples:
-            if args.dataset == "apps":
-                responses = json.loads(example[response_column])
-                response = random.choice(responses)
-                icl_prompt += (
-                    f"### Instruction:\nWrite a python code to solve the following coding problem that obeys the constraints "
-                    f"and passes the example test cases. The output code needs to {example['guide']}:"
-                    f"\n{example[instruction_column]}\n### Response:\n```python\n{response}\n```\n\n"
-                )
-            else:
-                icl_prompt += (
-                    f"### Instruction:\n{example[instruction_column]}\n"
-                    f"### Response:\n```python\n{example[response_column]}\n```\n\n"
-                )
+            icl_prompt += (
+                f"### Instruction:\n{example[instruction_column]}\n"
+                f"### Response:\n```python\n{example[response_column]}\n```\n\n"
+            )
 
     def preprocess_function(examples):
         prompts = []
-        prompt_template = "### Instruction:\n{instruction}\n### Response:\n```python{starter_code}\n"
+        prompt_template = "### Instruction:\n{instruction}\n### Response:\n```python\n"
+        # CodeLlama prompt for APPs, similar to what is reported in the paper
+        prompt_template_apps = (
+            "[INST] Write a python code to solve the following coding problem that obeys the constraints "
+            "and passes the example test cases. The output code needs to {guide}:\n{instruction}\n[/INST]\n"
+            "```python\n{starter_code}"
+        )
 
         for i, instruction in enumerate(examples[instruction_column]):
-            starter_code = ""
             if args.dataset == "apps":
                 starter_code = "" if examples["starter_code"][i] is None else examples["starter_code"][i]
-
-            prompt = prompt_template.format(instruction=instruction, starter_code=starter_code)
-            if args.dataset == "apps":
-                # similar prompt to Figure 14 in CodeLlama paper.
-                prompt = (
-                    f"### Instruction:\nWrite a python code to solve the following coding problem that obeys the constraints "
-                    f"and passes the example test cases. The output code needs to {examples['guide'][i]}:"
-                ) + prompt.split("### Instruction:")[-1]
+                prompt = prompt_template_apps.format(
+                    guide=examples["guide"][i],
+                    instruction=instruction,
+                    starter_code=starter_code
+                )
+            else:
+                prompt = prompt_template.format(instruction=instruction)
 
             # add zero-shot / ICL examples
             if args.num_icl_examples >= 0:
@@ -113,7 +108,6 @@ def run_test(args):
                         cname not in ["input_ids", "attention_mask"]],
         desc="Generating samples features."
     )
-
     dataloader = DataLoader(
         test_dataset_tokenized,
         batch_size=args.batch_size,
@@ -132,7 +126,7 @@ def run_test(args):
             "do_sample": True,
             "temperature": .6,
             "top_p": .95,
-            "num_return_sequences": 5,
+            "num_return_sequences": 5
         }
 
     predictions = [[] for _ in range(len(test_dataset_tokenized))]
