@@ -64,6 +64,7 @@ def run_train(args):
                 "and passes the example test cases. The output code needs to {guide}:\n{instruction}\n[/INST]\n"
                 "```python\n{response}\n```</s>"
             )
+
             prompts = [
                 prompt_template_apps.format(guide=guide, instruction=instruction, response=response.strip())
                 for guide, instruction, response in zip(guides, instructions, responses)
@@ -168,5 +169,4 @@ def run_train(args):
 
     eval_results = trainer.evaluate()
     logger.info(f"Evaluation loss before training: {round(eval_results['eval_loss'], 4)}")
-
     trainer.train()

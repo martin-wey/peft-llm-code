@@ -60,28 +60,28 @@ LORA_IA3_TARGET_MODULES = {
         "ff_modules": ["fc_in", "fc_out"]
     },
     "CodeLlama-7b-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
+        "target_modules_lora":["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]
     },
     "CodeLlama-7b-Instruct-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]
     },
     "CodeLlama-7b-Python-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]
     },
     "CodeLlama-13b-Python-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]
     },
     "CodeLlama-34b-Python-hf": {
-        "target_modules_lora": ["q_proj", "k_proj", "v_proj"],
-        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_lora": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        "target_modules_ia3": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         "ff_modules": ["gate_proj", "up_proj", "down_proj"]
     }
 }
@@ -265,14 +265,14 @@ def load_model_and_tokenizer(args, is_training=False):
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16
+            bnb_4bit_compute_dtype=torch.bfloat16
         )
         model_kwargs["quantization_config"] = qconfig
 
     model = model_cls.from_pretrained(args.model_name_or_path, **model_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
 
-    if is_training:
+    if is_training and args.adapter_path is None:
         if args.tuning_method in ["lora", "qlora-8bit", "qlora-4bit"]:
             peft_config = LoraConfig(
                 task_type=task_type,
@@ -306,18 +306,22 @@ def load_model_and_tokenizer(args, is_training=False):
             model = get_peft_model(model, peft_config)
             model.print_trainable_parameters()
     else:
-        model.config.use_cache = True
         if args.adapter_path is not None:
-            model = PeftModel.from_pretrained(model, args.adapter_path)
-            model = model.merge_and_unload()
-            # model.print_trainable_parameters()
+            if args.do_test:
+                model = PeftModel.from_pretrained(model, args.adapter_path)
+                model = model.merge_and_unload()
+                model.config.use_cache = True
+            else:
+                # continue fine-tuning from PEFT adapter checkpoint
+                model = PeftModel.from_pretrained(model, args.adapter_path, is_trainable=True)
+                model.print_trainable_parameters()
 
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
         model.config.pad_token_id = model.config.eos_token_id
 
     # set padding side for non-seq2seq models
-    if "codet5" not in args.model_name_or_path:
+    if "codet5" not in args.model_name_or_path and args.adapter_path is None:
         tokenizer.padding_side = "left"
 
     return model, tokenizer

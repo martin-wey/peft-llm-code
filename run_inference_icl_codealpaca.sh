@@ -1,7 +1,5 @@
 #!/bin/bash
 
-export HF_HOME="/Tmp/weyssowm/.cache/huggingface"
-
 models=(
   "codellama/CodeLlama-7b-hf"
   "codellama/CodeLlama-7b-Python-hf"

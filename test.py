@@ -66,7 +66,7 @@ def run_test(args):
         prompt_template = "### Instruction:\n{instruction}\n### Response:\n```python\n"
         # CodeLlama prompt for APPs, similar to what is reported in the paper
         prompt_template_apps = (
-            "[INST] Write a python code to solve the following coding problem that obeys the constraints "
+            "<s>[INST] Write a python code to solve the following coding problem that obeys the constraints "
             "and passes the example test cases. The output code needs to {guide}:\n{instruction}\n[/INST]\n"
             "```python\n{starter_code}"
         )
@@ -80,7 +80,7 @@ def run_test(args):
                     starter_code=starter_code
                 )
             else:
-                prompt = prompt_template.format(instruction=instruction)
+                prompt = prompt_template.format(instruction=instruction, add_special_tokens=False)
 
             # add zero-shot / ICL examples
             if args.num_icl_examples >= 0:
@@ -124,7 +124,7 @@ def run_test(args):
     else:
         kwargs = {
             "do_sample": True,
-            "temperature": .6,
+            "temperature": args.temperature,
             "top_p": .95,
             "num_return_sequences": 5
         }
@@ -164,6 +164,8 @@ def run_test(args):
                 predictions[step * args.batch_size + i].extend(outputs)
 
     output_filename = f"predictions_{args.dataset}"
+    if args.dataset == "apps":
+        output_filename += f"_{args.temperature}"
 
     if args.num_icl_examples > -1:
         output_filename += f"_icl_n{args.num_icl_examples}"

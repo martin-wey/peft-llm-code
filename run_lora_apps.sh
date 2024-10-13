@@ -1,13 +1,9 @@
 #!/bin/bash
 
-export HF_HOME="/Tmp/weyssowm/.cache/huggingface"
-
-model="codellama/CodeLlama-7b-Instruct-hf"
-
-CUDA_VISIBLE_DEVICES=2 python main.py \
-  --model_name_or_path $model \
+CUDA_VISIBLE_DEVICES=0 python main.py \
+  --model_name_or_path "codellama/CodeLlama-7b-Instruct-hf" \
   --dataset apps \
-  --tuning_method lora \
+  --tuning_method qlora-4bit \
   --learning_rate 3e-4 \
   --batch_size 1 \
   --gradient_accumulation_steps 8 \
