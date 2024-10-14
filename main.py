@@ -49,6 +49,8 @@ if __name__ == "__main__":
     parser.add_argument("--prefix_num_virtual_tokens", default=10, type=int)
 
     parser.add_argument("--num_icl_examples", default=-1, type=int)
+    parser.add_argument("--num_rag_examples", default=0, type=int)
+    parser.add_argument("--rag_encoder_model", default="thenlper/gte-small", type=str)
 
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_test", action="store_true")

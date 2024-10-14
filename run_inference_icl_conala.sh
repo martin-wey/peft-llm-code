@@ -12,7 +12,7 @@ models=(
   "Salesforce/codet5p-770m"
 )
 
-ns=( 0 1 2 3 4 5 8 16 )
+ns=( 1 2 3 4 5 8 16 )
 
 for model in "${models[@]}"; do
   for n in "${ns[@]}"; do
@@ -20,7 +20,7 @@ for model in "${models[@]}"; do
     CUDA_VISIBLE_DEVICES=0 python main.py \
       --model_name_or_path $model \
       --dataset "conala" \
-      --num_icl_examples $n \
+      --num_rag_examples $n \
       --batch_size 1 \
       --do_test
   done

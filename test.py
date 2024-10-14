@@ -3,6 +3,10 @@ import os
 import random
 
 import torch
+from langchain.docstore.document import Document as LangchainDocument
+from langchain_community.vectorstores import FAISS
+from langchain_community.vectorstores.utils import DistanceStrategy
+from langchain_huggingface import HuggingFaceEmbeddings
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
@@ -49,17 +53,38 @@ def run_test(args):
     model, tokenizer = load_model_and_tokenizer(args, is_training=False)
 
     # in-context learning with random examples
-    icl_prompt = ""
     if args.num_icl_examples > 0:
         train_loading_func = globals().get(f"load_{args.dataset}_train_dataset")
         train_dataset = train_loading_func()["train"]
         random_indices = random.sample(range(len(train_dataset)), args.num_icl_examples)
         icl_examples = train_dataset.select(random_indices)
+
+        icl_prompt = ""
         for example in icl_examples:
             icl_prompt += (
                 f"### Instruction:\n{example[instruction_column]}\n"
                 f"### Response:\n```python\n{example[response_column]}\n```\n\n"
             )
+    # retrieval-augmented generation, select closest samples from training set
+    elif args.num_rag_examples > 0:
+        train_loading_func = globals().get(f"load_{args.dataset}_train_dataset")
+        train_dataset = train_loading_func()["train"]
+
+        knowledge_base = [
+            LangchainDocument(
+                page_content=sample[instruction_column],
+                metadata={"code": sample[response_column]}
+            ) for sample in tqdm(train_dataset)
+        ]
+        embedding_model = HuggingFaceEmbeddings(
+            model_name=args.rag_encoder_model,
+            multi_process=False,
+            model_kwargs={"device": "cuda"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+        knowledge_base_vectors = FAISS.from_documents(
+            knowledge_base, embedding_model, distance_strategy=DistanceStrategy.COSINE
+        )
 
     def preprocess_function(examples):
         prompts = []
@@ -82,9 +107,21 @@ def run_test(args):
             else:
                 prompt = prompt_template.format(instruction=instruction, add_special_tokens=False)
 
-            # add zero-shot / ICL examples
+            # in-context learning
             if args.num_icl_examples >= 0:
                 prompt = icl_prompt + prompt
+            # RAG
+            elif args.num_rag_examples > 0:
+                retrieved_docs = knowledge_base_vectors.similarity_search(query=instruction, k=args.num_rag_examples)
+                rag_prompt = ""
+                for doc in retrieved_docs:
+                    rag_prompt += (
+                        f"### Instruction:\n{doc.page_content}\n"
+                        f"### Response:\n```python\n{doc.metadata["code"]}\n```\n\n"
+                    )
+                prompt = rag_prompt + prompt
+
+            print(prompt)
 
             if "codet5" in args.model_name_or_path:
                 prompt += "<extra_id_0>"
@@ -101,7 +138,7 @@ def run_test(args):
 
     test_dataset_tokenized = test_dataset.map(
         preprocess_function,
-        num_proc=args.num_workers,
+        # num_proc=args.num_workers,
         batched=True,
         batch_size=args.batch_size,
         remove_columns=[cname for cname in test_dataset.column_names if
@@ -169,6 +206,9 @@ def run_test(args):
 
     if args.num_icl_examples > -1:
         output_filename += f"_icl_n{args.num_icl_examples}"
+
+    if args.num_rag_examples > 0:
+        output_filename += f"_rag_n{args.num_rag_examples}"
 
     with open(os.path.join(args.run_dir, f"{output_filename}.jsonl"), "w") as f:
         for outputs in predictions:
